@@ -100,6 +100,7 @@ const FindFriendsPage = () => {
                     </span>
                     <input
                         type="text"
+                        name="find-friends-query"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder="Buscar por nome..."

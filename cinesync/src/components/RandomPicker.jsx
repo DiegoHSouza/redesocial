@@ -4,6 +4,8 @@ import { Spinner } from './Common';
 import { DiceIcon, CloseIcon, ChevronDownIcon } from './Icons';
 import ContentCard from './ContentCard';
 import ConfirmModal from './ConfirmModal'; // <--- Importado
+import { useAuth } from '../contexts/AuthContext'; // Importar useAuth
+import { awardXP, XP_POINTS } from '../utils/gamification'; // Importar gamification
 import { useNavigate } from 'react-router-dom';
 
 const STREAMING_SERVICES = [
@@ -20,6 +22,7 @@ const RandomPicker = () => {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
     
+    const { currentUser } = useAuth(); // Obter usuário logado
     // Estados de Modal
     const [showResultModal, setShowResultModal] = useState(false);
     const [showErrorModal, setShowErrorModal] = useState(false); // Novo estado para erro
@@ -98,6 +101,10 @@ const RandomPicker = () => {
             if (randomItem) {
                 setResult(randomItem);
                 setShowResultModal(true);
+                // Dar XP ao usuário por usar a funcionalidade
+                if (currentUser) {
+                    awardXP(currentUser.uid, 'USE_RANDOM_PICKER');
+                }
             } else {
                 // Em vez de alert(), usamos o modal
                 setShowErrorModal(true);

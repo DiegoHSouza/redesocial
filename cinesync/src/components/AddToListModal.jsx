@@ -70,8 +70,8 @@ const AddToListModal = ({ movie, mediaType, onClose }) => {
                         <form onSubmit={handleCreateAndAdd}>
                              <h3 className="text-lg font-semibold mb-2">Nova Lista</h3>
                              <div className="space-y-4">
-                                <input type="text" value={newListName} onChange={e => setNewListName(e.target.value)} placeholder="Título da lista" className="input-style" required />
-                                <textarea value={newListDesc} onChange={e => setNewListDesc(e.target.value)} placeholder="Descrição (opcional)" rows="2" className="input-style"></textarea>
+                                <input type="text" name="new-list-name" value={newListName} onChange={e => setNewListName(e.target.value)} placeholder="Título da lista" className="input-style" required />
+                                <textarea name="new-list-desc" value={newListDesc} onChange={e => setNewListDesc(e.target.value)} placeholder="Descrição (opcional)" rows="2" className="input-style"></textarea>
                              </div>
                              <div className="flex justify-end space-x-2 mt-4">
                                  <button type="button" onClick={() => setShowCreateForm(false)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">Voltar</button>

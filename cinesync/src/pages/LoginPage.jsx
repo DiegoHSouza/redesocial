@@ -109,12 +109,12 @@ const LoginPage = () => {
                 <form onSubmit={handleEmailPassword} className="space-y-4">
                     {!isLogin && (
                         <div className="flex space-x-4">
-                            <input type="text" placeholder="Nome" value={nome} onChange={(e) => setNome(e.target.value)} className="input-style" required />
-                            <input type="text" placeholder="Sobrenome" value={sobrenome} onChange={(e) => setSobrenome(e.target.value)} className="input-style" required />
+                            <input type="text" name="nome" placeholder="Nome" value={nome} onChange={(e) => setNome(e.target.value)} className="input-style" required />
+                            <input type="text" name="sobrenome" placeholder="Sobrenome" value={sobrenome} onChange={(e) => setSobrenome(e.target.value)} className="input-style" required />
                         </div>
                     )}
-                    <input type="email" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500 text-gray-100" required />
-                    <input type="password" placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500 text-gray-100" required />
+                    <input type="email" name="email" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500 text-gray-100" required />
+                    <input type="password" name="password" placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500 text-gray-100" required />
                     <button type="submit" className="w-full py-3 text-white bg-gradient-to-r from-indigo-500 to-purple-600 rounded-md hover:opacity-90 transition-all font-semibold transform hover:scale-105">{isLogin ? 'Entrar' : 'Cadastrar'}</button>
                 </form>
                 <div className="flex items-center justify-center space-x-2">

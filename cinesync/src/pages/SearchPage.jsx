@@ -105,6 +105,7 @@ const SearchPage = () => {
                         </span>
                         <input
                             type="text"
+                            name="search-query"
                             value={query}
                             onChange={(e) => { setQuery(e.target.value); if (!e.target.value.trim()) setResults([]); }}
                             placeholder="Buscar por filmes ou séries..."

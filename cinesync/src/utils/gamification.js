@@ -1,15 +1,27 @@
 import { db } from '../services/firebaseConfig';
 import firebase from 'firebase/compat/app';
 
+// --- CONFIGURAÇÃO DE PONTOS ---
+export const XP_POINTS = {
+    REVIEW: 20,
+    COMMENT: 5,
+    LIKE_RECEIVED: 2,
+    FOLLOW_RECEIVED: 5,
+    CREATE_LIST: 10,
+    USE_RANDOM_PICKER: 1,
+    CREATE_CLUB_POST: 15,
+};
+
 // Configuração de Níveis
-export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2200, 3000, 4000, 5000];
+export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2200, 3000, 4000, 5000, 6500, 8000, 10000];
 
 // Configuração de Medalhas
 export const BADGES = {
-    'FIRST_REVIEW': { id: 'first_review', name: 'Crítico Iniciante', icon: '📝', desc: 'Fez a primeira avaliação' },
-    'POPULAR': { id: 'popular', name: 'Famosinho', icon: '🌟', desc: 'Teve 10 curtidas em um post' },
-    'MARATHON': { id: 'marathon', name: 'Maratonista', icon: '🍿', desc: 'Criou 3 listas' },
-    'SOCIAL': { id: 'social', name: 'Sociável', icon: '👋', desc: 'Seguiu 5 pessoas' }
+    'FIRST_REVIEW': { id: 'first_review', name: 'Crítico Iniciante', icon: '📝', desc: 'Fez sua primeira avaliação' },
+    'POPULAR': { id: 'popular', name: 'Famosinho', icon: '🌟', desc: 'Recebeu 10 curtidas em suas avaliações' },
+    'MARATHON': { id: 'marathon', name: 'Maratonista', icon: '🍿', desc: 'Criou 3 listas de filmes/séries' },
+    'SOCIAL': { id: 'social', name: 'Sociável', icon: '👋', desc: 'Seguiu 5 pessoas' },
+    'COMMUNITY_STARTER': { id: 'community_starter', name: 'Pioneiro', icon: '🏛️', desc: 'Criou seu primeiro post em um CineClub' },
 };
 
 // Calcula nível baseado no XP total
@@ -28,9 +40,15 @@ export const getNextLevelXp = (currentLevel) => {
 };
 
 // Dá XP para o usuário (Transação segura)
-export const awardXP = async (userId, amount, actionType) => {
+export const awardXP = async (userId, actionType, context = {}) => {
     if (!userId) return;
     
+    const amount = XP_POINTS[actionType];
+    if (!amount) {
+        console.warn(`Tipo de ação de XP desconhecido: ${actionType}`);
+        return;
+    }
+
     const userRef = db.collection('users').doc(userId);
     
     try {
@@ -38,19 +56,35 @@ export const awardXP = async (userId, amount, actionType) => {
             const doc = await transaction.get(userRef);
             if (!doc.exists) return;
 
-            const currentXP = doc.data().xp || 0;
-            const currentBadges = doc.data().badges || [];
+            const data = doc.data();
+            const currentXP = data.xp || 0;
+            const currentBadges = data.badges || [];
+
             let newXP = currentXP + amount;
             let newBadges = [...currentBadges];
 
-            // Exemplo de lógica de badge: Primeira review
-            if (actionType === 'review' && !currentBadges.includes(BADGES.FIRST_REVIEW.id)) {
+            // --- LÓGICA DE MEDALHAS EM TEMPO REAL ---
+            // context.reviewCount é o número de reviews ANTES desta nova.
+            if (actionType === 'REVIEW' && context.reviewCount === 0 && !newBadges.includes(BADGES.FIRST_REVIEW.id)) {
                 newBadges.push(BADGES.FIRST_REVIEW.id);
             }
+            // context.listCount é o número de listas ANTES desta nova.
+            if (actionType === 'CREATE_LIST' && context.listCount === 2 && !newBadges.includes(BADGES.MARATHON.id)) {
+                newBadges.push(BADGES.MARATHON.id);
+            }
+            // context.clubPostCount é o número de posts ANTES deste novo.
+            if (actionType === 'CREATE_CLUB_POST' && context.clubPostCount === 0 && !newBadges.includes(BADGES.COMMUNITY_STARTER.id)) {
+                newBadges.push(BADGES.COMMUNITY_STARTER.id);
+            }
+            // context.followingCount é o número de pessoas que o usuário seguia ANTES desta nova.
+            if (actionType === 'FOLLOW_GIVEN' && context.followingCount === 4 && !newBadges.includes(BADGES.SOCIAL.id)) {
+                newBadges.push(BADGES.SOCIAL.id);
+            }
+            // Medalhas como 'POPULAR' e 'SOCIAL' são mais fáceis de gerenciar em Cloud Functions ou na ação que as dispara (seguir, curtir).
 
             transaction.update(userRef, { 
                 xp: newXP,
-                badges: newBadges
+                badges: newBadges,
             });
         });
     } catch (error) {
@@ -64,6 +98,11 @@ export const recalculateUserXP = async (userId) => {
     if (!userId) return;
 
     try {
+        // --- 1. BUSCAR DADOS ATUAIS DO USUÁRIO ---
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) throw new Error("Usuário não encontrado para recalcular.");
+        const currentXP = userDoc.data().xp || 0;
+
         // 1. Conta todas as reviews feitas por este usuário
         let reviewsSnap;
         try {
@@ -118,6 +157,13 @@ export const recalculateUserXP = async (userId) => {
         if (followersCount >= 5) newBadges.push(BADGES.SOCIAL.id);
 
         // 7. Atualiza o usuário com o valor CORRETO
+        // --- 2. COMPARAÇÃO: SÓ ATUALIZA SE O NOVO XP FOR MAIOR ---
+        if (totalXP <= currentXP) {
+            console.log("Recálculo não necessário. XP atual é maior ou igual.");
+            return currentXP; // Retorna o XP atual sem fazer alterações
+        }
+
+        console.log(`Atualizando XP de ${currentXP} para ${totalXP}`);
         try {
             await db.collection('users').doc(userId).update({
                 xp: totalXP,
@@ -138,6 +184,3 @@ export const recalculateUserXP = async (userId) => {
         throw error;
     }
 };
-
-
-

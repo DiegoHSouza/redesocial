@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { tmdbApi } from '../services/tmdbApi';
+import { tmdbApi, TMDB_IMAGE_URL } from '../services/tmdbApi';
 import RandomPicker from '../components/RandomPicker';
 import { HeartIcon, DiceIcon, LayoutGridIcon, UsersIcon } from '../components/Icons'; // <--- Adicionei UsersIcon
 
 const STREAMING_SERVICES = [
-    { id: 8, name: 'Netflix' },
-    { id: 119, name: 'Prime Video' },
-    { id: 337, name: 'Disney+' },
-    { id: 1899, name: 'Max' },
-    { id: 350, name: 'Apple TV+' },
+    { id: 8, name: 'Netflix', logo: '/logos/netflix.svg', color: 'shadow-red-500/40' },
+    { id: 119, name: 'Prime Video', logo: '/logos/prime.svg', color: 'shadow-cyan-400/40' },
+    { id: 337, name: 'Disney+', logo: '/logos/disney.svg', color: 'shadow-blue-500/40' },
+    { id: 1899, name: 'Max', logo: '/logos/max.svg', color: 'shadow-purple-500/40' },
+    { id: 350, name: 'Apple TV+', logo: '/logos/apple.svg', color: 'shadow-gray-400/40' },
 ];
 
 const EXPLORE_SERVICES = [
@@ -19,42 +19,7 @@ const EXPLORE_SERVICES = [
 
 const HomePage = () => {
     const navigate = useNavigate();
-    const [activeTab, setActiveTab] = useState('catalog'); // 'catalog', 'roulette', 'match', 'clubs'
-    const [backgroundPoster, setBackgroundPoster] = useState('');
-    const [servicePosters, setServicePosters] = useState({});
-
-    useEffect(() => {
-        const fetchPosters = async () => {
-            const posterData = {};
-            for (const service of EXPLORE_SERVICES.filter(s => s.id !== 'all').slice(0, 3)) {
-                try {
-                    const data = await tmdbApi.discoverContent('movie', service.id, 1);
-                    posterData[service.id] = data.results
-                        .map(item => item.backdrop_path)
-                        .filter(Boolean)
-                        .map(path => `https://image.tmdb.org/t/p/original${path}`);
-                } catch (error) {
-                    console.error(`Failed to fetch posters`, error);
-                }
-            }
-            setServicePosters(posterData);
-        };
-
-        fetchPosters();
-    }, []);
-
-    const handleMouseEnter = (serviceId) => {
-        if (serviceId !== 'all' && servicePosters[serviceId] && servicePosters[serviceId].length > 0) {
-            const randomIndex = Math.floor(Math.random() * servicePosters[serviceId].length);
-            setBackgroundPoster(servicePosters[serviceId][randomIndex]);
-        } else {
-            setBackgroundPoster('');
-        }
-    };
-
-    const handleMouseLeave = () => {
-        setBackgroundPoster('');
-    };
+    const [activeTab, setActiveTab] = useState('catalog');
 
     const handleNavigate = (service) => {
         if (service.id === 'all') {
@@ -69,14 +34,7 @@ const HomePage = () => {
          <div className="relative min-h-[calc(100vh-80px)] flex flex-col items-center pt-4 md:pt-8 overflow-hidden">
             
             <div className="absolute inset-0 w-full h-full z-[-1]">
-                <div 
-                    className="absolute inset-0 w-full h-full bg-cover bg-center transition-opacity duration-1000 ease-in-out"
-                    style={{
-                        backgroundImage: backgroundPoster ? `url(${backgroundPoster})` : 'none',
-                        opacity: backgroundPoster ? 0.4 : 0
-                    }}
-                ></div>
-                <div className="absolute inset-0 bg-gray-900/95 backdrop-blur-sm"></div>
+                <div className="absolute inset-0 bg-gray-900"></div>
             </div>
 
             <div className="container mx-auto p-2 md:p-8 text-white relative z-10 w-full max-w-4xl">
@@ -131,19 +89,7 @@ const HomePage = () => {
                             <p className="text-gray-400 text-sm md:text-base">Navegue pelos catálogos completos dos seus streamings favoritos.</p>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                            {EXPLORE_SERVICES.map(service => (
-                                <div 
-                                    key={service.id} 
-                                    onClick={() => handleNavigate(service)}
-                                    onMouseEnter={() => handleMouseEnter(service.id)}
-                                    onMouseLeave={handleMouseLeave}
-                                    className="group bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 md:p-6 flex items-center justify-center cursor-pointer transition-all duration-300 transform hover:scale-105 hover:bg-white/10 hover:shadow-2xl hover:shadow-indigo-500/30 hover:border-white/20 aspect-video min-w-0"
-                                >
-                                    <h3 className="text-lg md:text-2xl font-bold tracking-tight text-white text-shadow transition-colors truncate w-full text-center">
-                                        {service.name}
-                                    </h3>
-                                </div>
-                            ))}
+                            {EXPLORE_SERVICES.map(service => <ServiceCard key={service.id} service={service} onClick={() => handleNavigate(service)} />)}
                         </div>
                     </div>
                 )}
@@ -195,6 +141,77 @@ const HomePage = () => {
                     </div>
                 )}
 
+            </div>
+        </div>
+    );
+};
+
+const ServiceCard = ({ service, onClick }) => {
+    const [posters, setPosters] = useState([]);
+    const [activePosterIndex, setActivePosterIndex] = useState(0);
+    const [isFading, setIsFading] = useState(false);
+
+    useEffect(() => {
+        let isMounted = true;
+        const fetchPosters = async () => {
+            if (service.id === 'all' || service.id === 'match' || service.id === 'clubs') return;
+            try {
+                const data = await tmdbApi.discoverContent('movie', service.id, 1, null, 'popularity.desc');
+                const posterUrls = data.results
+                    .filter(item => item.backdrop_path)
+                    .slice(0, 10)
+                    .map(item => `${TMDB_IMAGE_URL.replace('/original', '/w1280')}${item.backdrop_path}`);
+                
+                if (isMounted && posterUrls.length > 0) {
+                    setPosters(posterUrls);
+                }
+            } catch (error) {
+                console.error(`Falha ao buscar pôsteres para ${service.name}`, error);
+            }
+        };
+        fetchPosters();
+        return () => { isMounted = false; };
+    }, [service.id, service.name]);
+
+    useEffect(() => {
+        if (posters.length <= 1) return; // Não roda o intervalo se não tiver imagens suficientes
+
+        const intervalId = setInterval(() => {
+            setIsFading(true); // Inicia o fade-out da imagem antiga
+            setTimeout(() => {
+                setActivePosterIndex((prevIndex) => (prevIndex + 1) % posters.length);
+                setIsFading(false); // Inicia o fade-in da nova imagem
+            }, 1000); // Duração do fade-out (deve ser igual à transição de opacidade)
+        }, 6000); // Tempo total: 5s visível + 1s de transição
+
+        return () => clearInterval(intervalId);
+    }, [posters]);
+
+    const currentPoster = posters[activePosterIndex];
+    const nextPoster = posters[(activePosterIndex + 1) % posters.length];
+
+    return (
+        <div 
+            onClick={onClick}
+            className={`group relative bg-black/20 backdrop-blur-md border border-white/10 rounded-2xl p-4 flex items-center justify-center cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl hover:border-white/20 aspect-video overflow-hidden hover:${service.color || 'shadow-indigo-500/30'}`}
+        >
+            {/* Camada de Pôster 1 (Atual) */}
+            <div
+                className="absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out"
+                style={{ backgroundImage: `url(${currentPoster})`, opacity: isFading ? 0 : 1 }}
+            />
+            {/* Camada de Pôster 2 (Próximo) */}
+            <div
+                className="absolute inset-0 bg-cover bg-center"
+                style={{ backgroundImage: `url(${nextPoster})`, opacity: 0 }}
+            />
+
+            {/* Overlay de Gradiente para legibilidade e cor */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-80 group-hover:opacity-100 transition-opacity duration-300"></div>
+
+            {/* Conteúdo do Card */}
+            <div className="relative z-10 flex flex-col items-center justify-center text-center">
+                <h3 className="text-xl md:text-2xl font-bold tracking-tight text-white transition-transform duration-300 group-hover:scale-110" style={{ textShadow: '2px 2px 8px rgba(0,0,0,0.8)' }}>{service.name}</h3>
             </div>
         </div>
     );

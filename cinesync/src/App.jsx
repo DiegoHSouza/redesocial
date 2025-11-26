@@ -15,6 +15,7 @@ import DetailPage from './pages/DetailPage';
 import StreamingCatalogPage from './pages/StreamingCatalogPage';
 import ListPage from './pages/ListPage';
 import ProfilePage from './pages/ProfilePage';
+import CreateListPage from './pages/CreateListPage';
 
 // Páginas Sociais/Chat
 import ChatListPage from './pages/ChatListPage';
@@ -25,6 +26,7 @@ import CineMatchPage from './pages/CineMatchPage';
 import CineClubsPage from './pages/CineClubsPage';
 import ClubDetailPage from './pages/ClubDetailPage';
 import ClubPostPage from './pages/ClubPostPage'; // <--- 1. IMPORTADO
+import AchievementsPage from './pages/AchievementsPage';
 
 // --- COMPONENTES GLOBAIS ---
 import Header from './components/Header';
@@ -76,7 +78,9 @@ function AnimatedRoutes() {
                     {/* Conteúdo e Perfil */}
                     <Route path="/detail/:mediaType/:mediaId" element={<PrivateRoute><PageTransition><DetailPage /></PageTransition></PrivateRoute>} />
                     <Route path="/profile/:userId" element={<PrivateRoute><PageTransition><ProfilePage /></PageTransition></PrivateRoute>} />
+                    <Route path="/profile/:userId/achievements" element={<PrivateRoute><PageTransition><AchievementsPage /></PageTransition></PrivateRoute>} />
                     <Route path="/list/:listId" element={<PageTransition><ListPage /></PageTransition>} />
+                    <Route path="/create-list" element={<PrivateRoute><PageTransition><CreateListPage /></PageTransition></PrivateRoute>} />
                     
                     {/* Chat */}
                     <Route path="/chats" element={<PrivateRoute><PageTransition><ChatListPage /></PageTransition></PrivateRoute>} />

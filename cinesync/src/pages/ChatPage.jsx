@@ -160,6 +160,7 @@ const ChatPage = () => {
             <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700 flex items-center space-x-3 bg-gray-900">
                 <input 
                     type="text" 
+                    name="new-message"
                     value={newMessage} 
                     onChange={e => setNewMessage(e.target.value)} 
                     placeholder="Digite uma mensagem..." 

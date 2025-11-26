@@ -228,6 +228,7 @@ const CineMatchPage = () => {
                                 <div className="flex flex-col sm:flex-row gap-2">
                                     <input 
                                         type="text" 
+                                        name="session-id"
                                         value={sessionId} 
                                         onChange={e => setSessionId(e.target.value)} 
                                         placeholder="Código da Sala" 

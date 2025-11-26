@@ -3,13 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../services/firebaseConfig';
 import firebase from 'firebase/compat/app';
 import { useAuth } from '../contexts/AuthContext';
-import { MapPinIcon, HeartIcon, RefreshIcon } from '../components/Icons'; // Adicionei RefreshIcon
+import { MapPinIcon, HeartIcon, RefreshIcon, PlusIcon } from '../components/Icons';
 import { Spinner, ErrorMessage, getAvatarUrl } from '../components/Common';
 import ReviewCard from '../components/ReviewCard';
 import ListCard from '../components/ListCard';
-import UserListModal from '../components/UserListModal';
+import UserListModal from '../components/UserListModal'; 
 import EditProfileModal from '../components/EditProfileModal';
-import { calculateLevel, getNextLevelXp, BADGES, recalculateUserXP } from '../utils/gamification';
+import { calculateLevel, getNextLevelXp, BADGES, recalculateUserXP, awardXP } from '../utils/gamification';
 
 const ProfilePage = () => {
     const { userId } = useParams();
@@ -129,6 +129,9 @@ const ProfilePage = () => {
             batch.update(userRef, { seguindo: firebase.firestore.FieldValue.arrayUnion(profileData.uid) });
             batch.update(targetRef, { seguidores: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) });
             
+            // Dar XP para o usuário que foi seguido
+            awardXP(profileData.uid, 'FOLLOW_RECEIVED');
+
             batch.set(notificationRef, {
                 recipientId: profileData.uid,
                 senderId: currentUser.uid,
@@ -226,6 +229,16 @@ const ProfilePage = () => {
         coverSrc = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1000&q=80';
     }
 
+    // Função para obter a classe da moldura com base no nível
+    const getLevelBorderClass = (level) => {
+        if (level >= 40) return 'border-purple-500 shadow-purple-500/40'; // Mestre
+        if (level >= 30) return 'border-cyan-400 shadow-cyan-400/40';   // Diamante
+        if (level >= 20) return 'border-yellow-400 shadow-yellow-400/40'; // Ouro
+        if (level >= 10) return 'border-gray-400 shadow-gray-400/40';    // Prata
+        if (level >= 1) return 'border-yellow-700 shadow-yellow-700/40';     // Bronze
+        return 'border-gray-800'; // Padrão
+    };
+
     return (
         <div className="container mx-auto p-4 sm:p-0 md:p-8 text-white">
             <div className="max-w-4xl mx-auto">
@@ -237,11 +250,11 @@ const ProfilePage = () => {
                         onError={(e) => { e.target.onerror = null; e.target.src='https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1000&q=80'; }}
                     />
                     <div className="absolute -bottom-16 left-1/2 -translate-x-1/2 md:left-8 md:translate-x-0">
-                        <div className="relative">
+                        <div className={`relative p-1 rounded-full ${getLevelBorderClass(level)} bg-gray-900 shadow-lg`}>
                             <img 
                                 src={getAvatarUrl(profileData.foto, profileData.nome)} 
                                 alt={profileData.nome} 
-                                className="w-32 h-32 md:w-40 md:h-40 rounded-full object-cover border-4 border-gray-900 bg-gray-800"
+                                className="w-32 h-32 md:w-40 md:h-40 rounded-full object-cover bg-gray-800"
                                 onError={(e) => { e.target.onerror = null; e.target.src=getAvatarUrl(null, profileData.nome); }}
                             />
                             <div className="absolute bottom-0 right-0 bg-indigo-600 text-white text-xs font-bold px-2 py-1 rounded-full border-2 border-gray-900 shadow-lg">
@@ -361,6 +374,7 @@ const ProfilePage = () => {
                     <div className="flex border-b border-gray-700 mb-6">
                         <button onClick={() => setActiveTab('reviews')} className={`py-2 px-4 font-semibold ${activeTab === 'reviews' ? 'text-white border-b-2 border-indigo-500' : 'text-gray-400'}`}>Avaliações</button>
                         <button onClick={() => setActiveTab('lists')} className={`py-2 px-4 font-semibold ${activeTab === 'lists' ? 'text-white border-b-2 border-indigo-500' : 'text-gray-400'}`}>Listas</button>
+                        <button onClick={() => navigate(`/profile/${userId}/achievements`)} className="py-2 px-4 font-semibold text-gray-400">Conquistas</button>
                     </div>
                     
                     {activeTab === 'reviews' ? (
@@ -370,10 +384,26 @@ const ProfilePage = () => {
                             )) : <p className="text-gray-400 text-center py-4">Este usuário ainda não fez nenhuma avaliação.</p>}
                         </div>
                     ) : (
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                            {userLists.length > 0 ? userLists.map(list => (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {/* Card para criar nova lista (apenas para o dono do perfil) */}
+                            {currentUser && currentUser.uid === userId && (
+                                <div 
+                                    onClick={() => navigate('/create-list')}
+                                    className="flex flex-col items-center justify-center bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-2xl p-4 cursor-pointer hover:border-indigo-500 hover:bg-gray-800 transition-all group aspect-square"
+                                >
+                                    <div className="w-16 h-16 bg-gray-700/80 rounded-full flex items-center justify-center mb-4 group-hover:bg-indigo-500/30 transition-colors">
+                                        <PlusIcon className="w-8 h-8 text-gray-400 group-hover:text-indigo-300" />
+                                    </div>
+                                    <h4 className="font-bold text-white group-hover:text-indigo-400">Criar Nova Lista</h4>
+                                    <p className="text-sm text-gray-400">Comece uma nova coleção</p>
+                                </div>
+                            )}
+                            {/* Mapeamento das listas existentes */}
+                            {userLists.map(list => (
                                 <ListCard key={list.id} list={list} />
-                            )) : <p className="text-gray-400 col-span-full text-center py-4">Este usuário ainda não criou nenhuma lista.</p>}
+                            ))}
+                            {/* Mensagem de lista vazia (agora com lógica correta) */}
+                            {userLists.length === 0 && <p className="text-gray-400 sm:col-span-2 lg:col-span-3 text-center py-4">Este usuário ainda não criou nenhuma lista.</p>}
                         </div>
                     )}
                 </div>

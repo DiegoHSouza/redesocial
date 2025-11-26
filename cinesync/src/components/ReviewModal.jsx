@@ -83,6 +83,7 @@ const ReviewModal = ({ movie, onClose, existingReview, mediaType }) => {
                     <div>
                          <label className="block mb-2 text-gray-300 font-medium">Comentário (opcional):</label>
                          <textarea 
+                            name="comentario"
                             value={comentario} 
                             onChange={e => setComentario(e.target.value)} 
                             rows="4" 
