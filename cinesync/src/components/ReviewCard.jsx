@@ -10,7 +10,7 @@ import ReviewModal from './ReviewModal';
 import ConfirmModal from './ConfirmModal';
 import html2canvas from 'html2canvas'; 
 
-const ReviewCard = ({ review: initialReview }) => { // Removi 'isCompact', agora o design é único e premium
+const ReviewCard = ({ review: initialReview }) => {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
     

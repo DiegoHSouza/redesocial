@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AnimatePresence } from 'framer-motion';
 
@@ -27,6 +27,8 @@ import CineClubsPage from './pages/CineClubsPage';
 import ClubDetailPage from './pages/ClubDetailPage';
 import ClubPostPage from './pages/ClubPostPage'; // <--- 1. IMPORTADO
 import AchievementsPage from './pages/AchievementsPage';
+import AboutPage from './pages/AboutPage'; // Importa a página Sobre
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage'; // Importa a nova página
 
 // --- COMPONENTES GLOBAIS ---
 import Header from './components/Header';
@@ -48,7 +50,7 @@ function AnimatedRoutes() {
 
     return (
         // Layout base com ajuste para o Header fixo (pt-24) e BottomNav (pb-24 no mobile)
-        <div className={`bg-gray-900 min-h-screen text-white font-sans pb-24 md:pb-0 ${currentUser ? 'pt-24' : ''}`}>
+        <div className={`bg-gray-900 min-h-screen text-white font-sans flex flex-col ${currentUser ? 'pt-24' : ''}`}>
             
             {currentUser && <Header />} 
 
@@ -59,6 +61,16 @@ function AnimatedRoutes() {
                     {/* Autenticação */}
                     <Route path="/login" element={
                         <PageTransition><LoginPage /></PageTransition>
+                    } />
+
+                    {/* Rota Pública para a Política de Privacidade */}
+                    <Route path="/privacy-policy" element={
+                        <PageTransition><PrivacyPolicyPage /></PageTransition>
+                    } />
+
+                    {/* Rota Pública para a página Sobre */}
+                    <Route path="/about" element={
+                        <PageTransition><AboutPage /></PageTransition>
                     } />
                     
                     {/* --- ROTAS PROTEGIDAS --- */}
@@ -98,6 +110,19 @@ function AnimatedRoutes() {
             </AnimatePresence>
 
             {currentUser && <BottomNavBar />}
+
+            {/* Rodapé Global */}
+            <footer className="w-full text-center p-4 mt-auto text-xs text-gray-500 border-t border-gray-800/50">
+                <div className="flex justify-center items-center gap-4">
+                    <span>© {new Date().getFullYear()} CineSync. Todos os direitos reservados.</span>
+                    <Link to="/about" className="hover:text-gray-300 transition-colors">
+                        Sobre Nós
+                    </Link>
+                    <Link to="/privacy-policy" className="hover:text-gray-300 transition-colors">
+                        Política de Privacidade
+                    </Link>
+                </div>
+            </footer>
         </div>
     );
 }

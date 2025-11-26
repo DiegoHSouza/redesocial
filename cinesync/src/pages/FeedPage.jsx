@@ -3,37 +3,39 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../services/firebaseConfig';
 import { useAuth } from '../contexts/AuthContext';
 import ReviewCard from '../components/ReviewCard';
+import AdSenseBlock from '../components/AdSenseBlock'; // 1. Importe o componente de anúncio
 import { Spinner } from '../components/Common';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const FeedPage = () => {
     const navigate = useNavigate();
     const { userData, currentUser } = useAuth();
-    const [activeTab, setActiveTab] = useState('seguindo');
+    const [activeTab, setActiveTab] = useState('paraVoce'); // 1. Mudar a aba padrão para 'paraVoce'
     const [feed, setFeed] = useState([]);
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
     const [lastDoc, setLastDoc] = useState(null);
     const observer = useRef();
-    const POSTS_PER_PAGE = 5;
+    const POSTS_PER_PAGE = 10; // Aumentado para 10, como solicitado
 
     useEffect(() => {
-        if (!currentUser) {
-            setLoading(false);
-            return;
-        }
-        
         setLoading(true);
         setFeed([]);
         setLastDoc(null);
         setHasMore(true);
-        
+
         let query;
         if (activeTab === 'seguindo') {
             if (!userData || !userData.seguindo || userData.seguindo.length === 0) {
                 setFeed([]);
                 setHasMore(false);
+                setLoading(false);
+                return;
+            }
+            // 2. Se não estiver logado na aba 'seguindo', não mostre nada.
+            if (!currentUser) {
+                setFeed([]);
                 setLoading(false);
                 return;
             }
@@ -187,17 +189,24 @@ const FeedPage = () => {
                         <>
                             {feed.length > 0 ? (
                                 <div className="space-y-8 max-w-2xl mx-auto">
-                                    {feed.map((review, index) => (
-                                        <motion.div 
-                                            key={`${review.id}-${index}`}
-                                            initial={{ opacity: 0, y: 20 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: index * 0.1 }}
-                                            ref={feed.length === index + 1 ? lastPostElementRef : null} 
-                                        >
-                                            <ReviewCard review={review} isCompact={true} />
-                                        </motion.div>
-                                    ))}
+                                    {feed.map((review, index) => {
+                                        const showAd = (index + 1) % 5 === 0; // Mostra um anúncio a cada 5 posts
+                                        return (
+                                            <React.Fragment key={`${review.id}-${index}`}>
+                                                <motion.div 
+                                                    initial={{ opacity: 0, y: 20 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    transition={{ delay: (index % POSTS_PER_PAGE) * 0.1 }}
+                                                    ref={feed.length === index + 1 ? lastPostElementRef : null} 
+                                                >
+                                                    <ReviewCard review={review} />
+                                                </motion.div>
+                                                {showAd && (
+                                                    <AdSenseBlock adSlot="YOUR_AD_SLOT_ID" /> // 2. Insira o anúncio
+                                                )}
+                                            </React.Fragment>
+                                        )
+                                    })}
                                 </div>
                             ) : (
                                 activeTab === 'seguindo' ? (

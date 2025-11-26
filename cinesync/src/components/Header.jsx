@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { auth } from '../services/firebaseConfig';
 import { useAuth } from '../contexts/AuthContext';
 import Notifications from './Notifications';
-import { HomeIcon, LayoutGridIcon, SearchIcon, UsersIcon, MessageSquareIcon } from './Icons';
+import { HomeIcon, LayoutGridIcon, SearchIcon, UsersIcon, MessageSquareIcon, UserIcon, LogOutIcon } from './Icons';
 import { getAvatarUrl } from './Common';
 
 const Header = () => {
@@ -11,12 +11,25 @@ const Header = () => {
     const location = useLocation();
     const { currentUser, userData } = useAuth();
     const [scrolled, setScrolled] = useState(false);
+    const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+    const profileMenuRef = useRef(null);
 
     // Detecta scroll para mudar a aparência do header
     useEffect(() => {
         const handleScroll = () => setScrolled(window.scrollY > 20);
         window.addEventListener('scroll', handleScroll);
         return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
+
+    // Fecha o menu do perfil ao clicar fora
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+                setIsProfileMenuOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
     const isActive = (path) => {
@@ -56,15 +69,28 @@ const Header = () => {
                         <>
                             <div className="flex items-center gap-3 pl-4 border-l border-white/10">
                                 <Notifications />
-                                <button onClick={() => navigate(`/profile/${currentUser.uid}`)} className="relative group">
-                                    <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-pink-500 rounded-full opacity-0 group-hover:opacity-100 transition duration-300 blur-sm"></div>
-                                    <img 
-                                        src={getAvatarUrl(userData.foto, userData.nome)} 
-                                        alt="Perfil" 
-                                        className="relative w-9 h-9 rounded-full object-cover border border-white/10"
-                                        onError={(e) => { e.target.onerror = null; e.target.src=getAvatarUrl(null, userData.nome); }}
-                                    />
-                                </button>
+                                <div className="relative" ref={profileMenuRef}>
+                                    <button onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)} className="relative group">
+                                        <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-pink-500 rounded-full opacity-0 group-hover:opacity-100 transition duration-300 blur-sm"></div>
+                                        <img 
+                                            src={getAvatarUrl(userData.foto, userData.nome)} 
+                                            alt="Perfil" 
+                                            className="relative w-9 h-9 rounded-full object-cover border border-white/10"
+                                            onError={(e) => { e.target.onerror = null; e.target.src=getAvatarUrl(null, userData.nome); }}
+                                        />
+                                    </button>
+                                    {isProfileMenuOpen && (
+                                        <div className="absolute right-0 mt-3 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden animate-fade-in">
+                                            <button onClick={() => { navigate(`/profile/${currentUser.uid}`); setIsProfileMenuOpen(false); }} className="w-full text-left flex items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+                                                <UserIcon className="w-4 h-4 mr-3"/> Ver Perfil
+                                            </button>
+                                            <div className="border-t border-gray-700"></div>
+                                            <button onClick={handleSignOut} className="w-full text-left flex items-center px-4 py-3 text-sm text-red-400 hover:bg-red-900/20 hover:text-red-300 transition-colors">
+                                                <LogOutIcon className="w-4 h-4 mr-3"/> Sair
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </>
                     ) : (
