@@ -1,122 +1,165 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../services/firebaseConfig';
+import firebase from 'firebase/compat/app';
 import { useAuth } from '../contexts/AuthContext';
-import ReviewCard from '../components/ReviewCard';
-import AdSenseBlock from '../components/AdSenseBlock'; // 1. Importe o componente de anúncio
-import { Spinner } from '../components/Common';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Componentes
+import ReviewCard from '../components/ReviewCard';
+import ListCard from '../components/ListCard';
+// CORREÇÃO: Importando da pasta components em vez de ./ (pasta atual)
+import AchievementCard from '../components/AchievementCard'; 
+import AdSenseBlock from '../components/AdSenseBlock';
+import { Spinner } from '../components/Common';
 
 const FeedPage = () => {
     const navigate = useNavigate();
     const { userData, currentUser } = useAuth();
-    const [activeTab, setActiveTab] = useState('paraVoce'); // 1. Mudar a aba padrão para 'paraVoce'
+    
+    // Estados
+    const [activeTab, setActiveTab] = useState('paraVoce');
     const [feed, setFeed] = useState([]);
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
-    const [lastDoc, setLastDoc] = useState(null);
+    const [lastDoc, setLastDoc] = useState(null); // Armazena o Timestamp para paginação
+    
     const observer = useRef();
-    const POSTS_PER_PAGE = 10; // Aumentado para 10, como solicitado
+    const POSTS_PER_PAGE = 5;
 
+    // --- CARREGAMENTO INICIAL ---
     useEffect(() => {
         setLoading(true);
         setFeed([]);
         setLastDoc(null);
         setHasMore(true);
-
-        let query;
-        if (activeTab === 'seguindo') {
-            if (!userData || !userData.seguindo || userData.seguindo.length === 0) {
-                setFeed([]);
-                setHasMore(false);
-                setLoading(false);
-                return;
-            }
-            // 2. Se não estiver logado na aba 'seguindo', não mostre nada.
-            if (!currentUser) {
-                setFeed([]);
-                setLoading(false);
-                return;
-            }
-            query = db.collection("reviews").where("uidAutor", "in", userData.seguindo.slice(0, 30));
-        } else {
-            query = db.collection("reviews");
-        }
-        
-        const finalQuery = query.orderBy("timestamp", "desc").limit(POSTS_PER_PAGE);
-        
-        const unsubscribe = finalQuery.onSnapshot(async (snapshot) => {
-            if (snapshot.empty) {
-                setFeed([]);
-                setHasMore(false);
-                setLoading(false);
-                return;
-            }
-        
-            const reviewsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+        const fetchInitialFeed = async () => {
+            let followedUsers = [];
             
-            // FILTRO DE SEGURANÇA: Remove reviews sem ID de autor ou filme
-            const validReviews = reviewsData.filter(r => r.uidAutor && r.movieId);
+            // Lógica da aba "Seguindo"
+            if (activeTab === 'seguindo') {
+                if (!currentUser || !userData?.seguindo || userData.seguindo.length === 0) {
+                    setFeed([]);
+                    setHasMore(false);
+                    setLoading(false);
+                    return;
+                }
+                followedUsers = userData.seguindo.slice(0, 30); // Limite do Firestore para operador 'in'
+            }
+    
+            // 1. Buscar Reviews
+            let reviewsQuery = db.collection("reviews");
+            if (activeTab === 'seguindo') reviewsQuery = reviewsQuery.where("uidAutor", "in", followedUsers);
+            const reviewsSnap = await reviewsQuery.orderBy("timestamp", "desc").limit(POSTS_PER_PAGE).get();
+            const reviewsData = reviewsSnap.docs.map(doc => ({ id: doc.id, type: 'review', timestamp: doc.data().timestamp, ...doc.data() }));
+    
+            // 2. Buscar Listas
+            let listsQuery = db.collection("lists");
+            if (activeTab === 'seguindo') listsQuery = listsQuery.where("uidAutor", "in", followedUsers);
+            const listsSnap = await listsQuery.orderBy("createdAt", "desc").limit(POSTS_PER_PAGE).get();
+            // Normaliza 'createdAt' para 'timestamp' para ordenação unificada
+            const listsData = listsSnap.docs.map(doc => ({ id: doc.id, type: 'list', timestamp: doc.data().createdAt, ...doc.data() }));
+    
+            // 3. Buscar Conquistas
+            let achievementsQuery = db.collection("achievements");
+            if (activeTab === 'seguindo') achievementsQuery = achievementsQuery.where("uidAutor", "in", followedUsers);
+            const achievementsSnap = await achievementsQuery.orderBy("timestamp", "desc").limit(POSTS_PER_PAGE).get();
+            const achievementsData = achievementsSnap.docs.map(doc => ({ id: doc.id, type: 'achievement', ...doc.data() }));
 
-            const authorIds = [...new Set(validReviews.map(r => r.uidAutor))];
+            // 4. Combinar e Ordenar
+            let combinedFeed = [...reviewsData, ...listsData, ...achievementsData];
+            combinedFeed.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+            combinedFeed = combinedFeed.slice(0, POSTS_PER_PAGE);
+    
+            if (combinedFeed.length === 0) {
+                 setFeed([]);
+                 setHasMore(false);
+                 setLoading(false);
+                 return;
+            }
+    
+            // 5. Popular autores (Populate)
+            const authorIds = [...new Set(combinedFeed.map(item => item.uidAutor))];
             const authors = {};
-            
             if (authorIds.length > 0) {
                 try {
                     const authorPromises = authorIds.map(id => db.collection('users').doc(id).get());
                     const authorDocs = await Promise.all(authorPromises);
-                    authorDocs.forEach(doc => {
-                        if (doc.exists) authors[doc.id] = doc.data();
-                    });
+                    authorDocs.forEach(doc => { if (doc.exists) authors[doc.id] = doc.data(); });
                 } catch (e) { console.error(e); }
             }
+    
+            const feedWithAuthors = combinedFeed
+                .map(item => ({ ...item, authorInfo: authors[item.uidAutor] }))
+                .filter(item => item.authorInfo); // Remove itens sem autor (segurança)
+    
+            setFeed(feedWithAuthors);
             
-            // Mapeia e filtra novamente: Se não achou o autor no banco, não mostra a review
-            const reviewsWithAuthors = validReviews
-                .map(r => ({ ...r, authorInfo: authors[r.uidAutor] }))
-                .filter(r => r.authorInfo); // <--- O PULO DO GATO: Remove reviews de usuários deletados
-
-            setFeed(reviewsWithAuthors);
-            setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
-            setHasMore(snapshot.docs.length === POSTS_PER_PAGE);
+            // Define o cursor para a próxima página (Timestamp do último item)
+            if (feedWithAuthors.length > 0) {
+                setLastDoc(feedWithAuthors[feedWithAuthors.length - 1].timestamp);
+            }
+            setHasMore(feedWithAuthors.length === POSTS_PER_PAGE);
             setLoading(false);
-        }, (error) => {
+        };
+    
+        fetchInitialFeed().catch(error => {
             console.error("Erro ao buscar feed:", error);
             setLoading(false);
         });
-        
-        return () => unsubscribe();
+
     }, [activeTab, userData, currentUser]);
 
+    // --- CARREGAR MAIS (PAGINAÇÃO) ---
     const loadMore = useCallback(() => {
         if (loadingMore || !hasMore || !lastDoc) return;
         setLoadingMore(true);
 
-        let query;
-        if (activeTab === 'seguindo') {
-            if (!userData || !userData.seguindo || userData.seguindo.length === 0) {
-                setLoadingMore(false); return;
+        const fetchMoreData = async () => {
+            let followedUsers = [];
+            if (activeTab === 'seguindo') {
+                if (!userData || !userData.seguindo || userData.seguindo.length === 0) {
+                    setLoadingMore(false); return;
+                }
+                followedUsers = userData.seguindo.slice(0, 30);
             }
-            query = db.collection("reviews").where("uidAutor", "in", userData.seguindo.slice(0, 30));
-        } else {
-            query = db.collection("reviews");
-        }
 
-        const finalQuery = query.orderBy("timestamp", "desc").startAfter(lastDoc).limit(POSTS_PER_PAGE);
+            // O cursor é o Timestamp do último item carregado
+            const cursor = lastDoc;
 
-         finalQuery.get().then(async (snapshot) => {
-             if (snapshot.empty) {
+            // 1. Mais Reviews
+            let reviewsQuery = db.collection("reviews").orderBy("timestamp", "desc").startAfter(cursor).limit(POSTS_PER_PAGE);
+            if (activeTab === 'seguindo') reviewsQuery = reviewsQuery.where("uidAutor", "in", followedUsers);
+            const reviewsSnap = await reviewsQuery.get();
+            const newReviews = reviewsSnap.docs.map(doc => ({ id: doc.id, type: 'review', timestamp: doc.data().timestamp, ...doc.data() }));
+
+            // 2. Mais Listas
+            let listsQuery = db.collection("lists").orderBy("createdAt", "desc").startAfter(cursor).limit(POSTS_PER_PAGE);
+            if (activeTab === 'seguindo') listsQuery = listsQuery.where("uidAutor", "in", followedUsers);
+            const listsSnap = await listsQuery.get();
+            const newLists = listsSnap.docs.map(doc => ({ id: doc.id, type: 'list', timestamp: doc.data().createdAt, ...doc.data() }));
+
+            // 3. Mais Conquistas
+            let achievementsQuery = db.collection("achievements").orderBy("timestamp", "desc").startAfter(cursor).limit(POSTS_PER_PAGE);
+            if (activeTab === 'seguindo') achievementsQuery = achievementsQuery.where("uidAutor", "in", followedUsers);
+            const achievementsSnap = await achievementsQuery.get();
+            const newAchievements = achievementsSnap.docs.map(doc => ({ id: doc.id, type: 'achievement', ...doc.data() }));
+
+            // 4. Combinar
+            let combinedNewFeed = [...newReviews, ...newLists, ...newAchievements];
+            combinedNewFeed.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+            combinedNewFeed = combinedNewFeed.slice(0, POSTS_PER_PAGE);
+
+             if (combinedNewFeed.length === 0) {
                  setHasMore(false);
                  setLoadingMore(false);
                  return;
              }
-             const newReviewsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
              
-             // MESMO FILTRO DE SEGURANÇA AQUI
-             const validReviews = newReviewsData.filter(r => r.uidAutor && r.movieId);
-             
-             const authorIds = [...new Set(validReviews.map(r => r.uidAutor))];
+             // 5. Popular Autores
+             const authorIds = [...new Set(combinedNewFeed.map(item => item.uidAutor))];
              const authors = {};
              if (authorIds.length > 0) {
                  const authorPromises = authorIds.map(id => db.collection('users').doc(id).get());
@@ -126,20 +169,23 @@ const FeedPage = () => {
                  });
              }
              
-             const newReviewsWithAuthors = validReviews
-                .map(r => ({ ...r, authorInfo: authors[r.uidAutor] }))
-                .filter(r => r.authorInfo); // Remove órfãos
+             const newFeedWithAuthors = combinedNewFeed
+                .map(item => ({ ...item, authorInfo: authors[item.uidAutor] }))
+                .filter(item => item.authorInfo);
 
-             setFeed(prev => [...prev, ...newReviewsWithAuthors]);
-             setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
-             setHasMore(snapshot.docs.length === POSTS_PER_PAGE);
+             setFeed(prev => [...prev, ...newFeedWithAuthors]);
+             
+             if (newFeedWithAuthors.length > 0) {
+                setLastDoc(newFeedWithAuthors[newFeedWithAuthors.length - 1].timestamp);
+             }
+             setHasMore(newFeedWithAuthors.length === POSTS_PER_PAGE);
              setLoadingMore(false);
-         }).catch(error => {
-             console.error("Erro ao carregar mais:", error);
-             setLoadingMore(false);
-         });
+        };
+
+        fetchMoreData().catch(error => { console.error("Erro ao carregar mais:", error); setLoadingMore(false); });
     }, [loadingMore, hasMore, lastDoc, activeTab, userData]);
 
+    // Intersection Observer para Infinite Scroll
     const lastPostElementRef = useCallback(node => {
         if (loading || loadingMore) return;
         if (observer.current) observer.current.disconnect();
@@ -188,21 +234,24 @@ const FeedPage = () => {
                     ) : (
                         <>
                             {feed.length > 0 ? (
-                                <div className="space-y-8 max-w-2xl mx-auto">
-                                    {feed.map((review, index) => {
+                                <div className="max-w-2xl mx-auto">
+                                    {feed.map((item, index) => {
                                         const showAd = (index + 1) % 5 === 0; // Mostra um anúncio a cada 5 posts
                                         return (
-                                            <React.Fragment key={`${review.id}-${index}`}>
+                                            <React.Fragment key={`${item.id}-${index}`}>
                                                 <motion.div 
                                                     initial={{ opacity: 0, y: 20 }}
                                                     animate={{ opacity: 1, y: 0 }}
                                                     transition={{ delay: (index % POSTS_PER_PAGE) * 0.1 }}
-                                                    ref={feed.length === index + 1 ? lastPostElementRef : null} 
+                                                    ref={feed.length === index + 1 ? lastPostElementRef : null}
+                                                    className={item.type === 'review' ? 'mb-8' : 'mb-6'}
                                                 >
-                                                    <ReviewCard review={review} />
+                                                    {item.type === 'review' && <ReviewCard review={item} activeTab={activeTab} />}
+                                                    {item.type === 'list' && <ListCard list={item} />}
+                                                    {item.type === 'achievement' && <AchievementCard achievement={item} />}
                                                 </motion.div>
                                                 {showAd && (
-                                                    <AdSenseBlock adSlot="YOUR_AD_SLOT_ID" /> // 2. Insira o anúncio
+                                                    <AdSenseBlock adSlot="YOUR_AD_SLOT_ID" />
                                                 )}
                                             </React.Fragment>
                                         )

@@ -57,7 +57,18 @@ const Header = () => {
                 </h1>
                 
                 <div className="hidden md:flex items-center space-x-2 bg-black/20 p-1.5 rounded-full border border-white/5 backdrop-blur-md">
-                    <NavItem icon={HomeIcon} active={isActive('/feed')} onClick={() => navigate('/feed')} tooltip="Feed" />
+                    <NavItem 
+                        icon={HomeIcon} 
+                        active={isActive('/feed')} 
+                        onClick={() => {
+                            if (location.pathname === '/feed' && window.scrollY > 0) {
+                                window.scrollTo({ top: 0, behavior: 'smooth' }); // Apenas rola para o topo
+                            } else {
+                                navigate('/feed');
+                            }
+                        }} 
+                        tooltip="Feed" 
+                    />
                     <NavItem icon={LayoutGridIcon} active={isActive('/home')} onClick={() => navigate('/home')} tooltip="Explorar" />
                     <NavItem icon={SearchIcon} active={isActive('/search')} onClick={() => navigate('/search')} tooltip="Buscar" />
                     <NavItem icon={UsersIcon} active={isActive('/friends')} onClick={() => navigate('/friends')} tooltip="Amigos" />

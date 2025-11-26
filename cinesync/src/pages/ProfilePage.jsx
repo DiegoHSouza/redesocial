@@ -9,7 +9,7 @@ import ReviewCard from '../components/ReviewCard';
 import ListCard from '../components/ListCard';
 import UserListModal from '../components/UserListModal'; 
 import EditProfileModal from '../components/EditProfileModal';
-import { calculateLevel, getNextLevelXp, BADGES, recalculateUserXP, awardXP } from '../utils/gamification';
+import { calculateLevel, getNextLevelXp, BADGES, triggerUserRecalculation, awardXP } from '../utils/gamification';
 
 const ProfilePage = () => {
     const { userId } = useParams();
@@ -20,6 +20,7 @@ const ProfilePage = () => {
     const [reviews, setReviews] = useState([]);
     const [userLists, setUserLists] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isFollowingLoading, setIsFollowingLoading] = useState(false);
     const [isFollowing, setIsFollowing] = useState(false);
     const [showEditModal, setShowEditModal] = useState(false);
     const [showUserList, setShowUserList] = useState(null);
@@ -27,7 +28,7 @@ const ProfilePage = () => {
     const [listLoading, setListLoading] = useState(false);
     const [activeTab, setActiveTab] = useState('reviews');
     
-    // Estado para o Match de Gosto
+    const [isSyncing, setIsSyncing] = useState(false);
     const [compatibility, setCompatibility] = useState(null);
 
     useEffect(() => {
@@ -72,53 +73,14 @@ const ProfilePage = () => {
         }
     }, [loggedInUserData, profileData]);
 
-    // Calcula Compatibilidade (Taste Match)
-    useEffect(() => {
-        const calculateMatch = async () => {
-            if (!currentUser || currentUser.uid === userId) return;
-            try {
-                const myReviewsSnap = await db.collection('reviews')
-                    .where('uidAutor', '==', currentUser.uid)
-                    .where('nota', '>=', 7)
-                    .get();
-
-                const theirGoodReviews = reviews.filter(r => r.nota >= 7).map(r => r.movieId);
-                const myGoodReviews = myReviewsSnap.docs.map(doc => doc.data().movieId);
-
-                if (myGoodReviews.length === 0 || theirGoodReviews.length === 0) {
-                    setCompatibility(0);
-                    return;
-                }
-
-                const common = myGoodReviews.filter(id => theirGoodReviews.includes(id));
-                const uniqueTotal = new Set([...myGoodReviews, ...theirGoodReviews]).size;
-
-                const percentage = Math.round((common.length / uniqueTotal) * 100);
-                setCompatibility(Math.min(100, percentage + 10));
-            } catch (error) {
-                // Trata erro de índice do Firestore
-                if (
-                    error.code === 'failed-precondition' ||
-                    (error.message && error.message.includes('The query requires an index'))
-                ) {
-                    setCompatibility(0);
-                } else {
-                    console.error("Erro ao calcular compatibilidade:", error);
-                }
-            }
-        };
-
-        if (reviews.length > 0 && currentUser) {
-            calculateMatch();
-        }
-    }, [reviews, currentUser, userId]);
-
     const handleFollow = async () => {
         if (!currentUser || !profileData) return;
         
+        setIsFollowingLoading(true);
+        const originalFollowingState = isFollowing;
+
         const userRef = db.collection("users").doc(currentUser.uid);
         const targetRef = db.collection("users").doc(profileData.uid);
-        const notificationRef = db.collection("notifications").doc();
         
         const batch = db.batch();
         
@@ -128,25 +90,14 @@ const ProfilePage = () => {
         } else {
             batch.update(userRef, { seguindo: firebase.firestore.FieldValue.arrayUnion(profileData.uid) });
             batch.update(targetRef, { seguidores: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) });
-            
-            // Dar XP para o usuário que foi seguido
-            awardXP(profileData.uid, 'FOLLOW_RECEIVED');
-
-            batch.set(notificationRef, {
-                recipientId: profileData.uid,
-                senderId: currentUser.uid,
-                type: 'follow',
-                read: false,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            });
         }
         
-        setIsFollowing(!isFollowing); 
         try {
             await batch.commit();
+            setIsFollowing(!originalFollowingState);
         } catch (error) {
             console.error("Erro ao seguir/deixar de seguir:", error);
-            setIsFollowing(!isFollowing);
+            setIsFollowing(originalFollowingState); // Reverte em caso de erro
         }
     };
 
@@ -198,15 +149,16 @@ const ProfilePage = () => {
         if (!currentUser || currentUser.uid !== userId) return;
         const confirmSync = window.confirm("Deseja recalcular seus pontos com base no histórico?");
         if (!confirmSync) return;
-
-        setLoading(true);
+        
+        setIsSyncing(true);
+        // A função triggerUserRecalculation já mostra os alertas de sucesso/erro
+        // e chama a Cloud Function segura que implementamos.
         try {
-            await recalculateUserXP(currentUser.uid);
-            alert("XP Sincronizado com sucesso!");
+            await triggerUserRecalculation();
         } catch (error) {
-            alert("Erro ao sincronizar.");
+            console.error("A sincronização falhou.", error);
         } finally {
-            setLoading(false);
+            setIsSyncing(false);
         }
     };
 
@@ -300,8 +252,9 @@ const ProfilePage = () => {
                                 </>
                             )
                         )}
-                     </div>
-                     
+                    </div>
+
+                    {/* Informações do Usuário */}
                     <div className="text-center md:text-left md:ml-48">
                         <h2 className="text-2xl md:text-3xl font-bold tracking-tight">{profileData.nome} {profileData.sobrenome}</h2>
                         <p className="text-gray-400">@{profileData.username}</p>
@@ -311,8 +264,8 @@ const ProfilePage = () => {
                             <div className="flex justify-between text-xs text-gray-400 mb-1 items-center">
                                 <span>{xp} XP</span>
                                 <div className="flex items-center gap-2">
-                                    <span>Próx: {nextLevelXp}</span>
-                                    {currentUser && currentUser.uid === userId && (
+                                    <span className="flex items-center gap-1">Próx: {nextLevelXp}</span>
+                                    {currentUser && currentUser.uid === userId && !isSyncing && (
                                         <button onClick={handleSyncXP} className="text-indigo-400 hover:text-white transition-colors" title="Sincronizar XP">
                                             <RefreshIcon className="w-3 h-3" />
                                         </button>

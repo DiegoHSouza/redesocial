@@ -4,15 +4,16 @@ import { db } from '../services/firebaseConfig';
 import firebase from 'firebase/compat/app';
 import { useAuth } from '../contexts/AuthContext';
 import { HeartIcon, MessageSquareIcon, StarIcon, DotsVerticalIcon, PencilIcon, TrashIcon, ShareIcon } from './Icons';
+import ReactionPicker, { REACTIONS } from '../pages/ReactionPicker'; // Importar
 import CommentSection from './CommentSection';
 import { getAvatarUrl } from './Common';
 import ReviewModal from './ReviewModal';
-import ConfirmModal from './ConfirmModal';
+import ConfirmModal from './ConfirmModal'; 
 import html2canvas from 'html2canvas'; 
 
-const ReviewCard = ({ review: initialReview }) => {
+const ReviewCard = ({ review: initialReview, activeTab }) => { // 1. Receber activeTab
     const navigate = useNavigate();
-    const { currentUser } = useAuth();
+    const { currentUser, userData: loggedInUserData } = useAuth(); // 2. Pegar dados do usuário logado
     
     const [review, setReview] = useState(initialReview);
     const [authorData, setAuthorData] = useState(null);
@@ -21,6 +22,8 @@ const ReviewCard = ({ review: initialReview }) => {
     const [showOptions, setShowOptions] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [isFollowing, setIsFollowing] = useState(false); // 3. Estado para seguir
+    const [showReactions, setShowReactions] = useState(false); // Estado para o seletor de reações
     
     const optionsRef = useRef(null);
     const cardRef = useRef(null);
@@ -42,7 +45,7 @@ const ReviewCard = ({ review: initialReview }) => {
     useEffect(() => {
         const unsubscribe = db.collection("reviews").doc(initialReview.id)
             .onSnapshot((doc) => {
-                if (doc.exists) {
+                if (doc.exists) { // Atualiza o estado local com dados do DB em tempo real
                     const data = doc.data();
                     setReview(prev => ({ ...prev, id: doc.id, ...data }));
                     if (!showComments) setRealCommentCount(data.commentCount || 0);
@@ -66,6 +69,14 @@ const ReviewCard = ({ review: initialReview }) => {
         getAuthor();
     }, [review.uidAutor, review.authorInfo]);
 
+    // 4. Efeito para saber se já segue o autor
+    useEffect(() => {
+        if (loggedInUserData && authorData) {
+            const seguindo = loggedInUserData.seguindo || [];
+            setIsFollowing(seguindo.includes(authorData.uid));
+        }
+    }, [loggedInUserData, authorData]);
+
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (optionsRef.current && !optionsRef.current.contains(event.target)) {
@@ -76,23 +87,87 @@ const ReviewCard = ({ review: initialReview }) => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    const handleLike = async () => {
-        if (!currentUser) return;
-        const reviewRef = db.collection("reviews").doc(review.id);
-        const likes = review.curtidas || [];
-        const isCurrentlyLiked = likes.includes(currentUser.uid);
-        
-        const newLikes = isCurrentlyLiked ? likes.filter(uid => uid !== currentUser.uid) : [...likes, currentUser.uid];
-        setReview(prev => ({ ...prev, curtidas: newLikes }));
+    // 5. Lógica para seguir/deixar de seguir
+    const handleFollow = async (e) => {
+        e.stopPropagation(); // Impede que o clique no botão acione o clique no card
+        if (!currentUser || !authorData) return;
 
-        const batch = db.batch();
-        batch.update(reviewRef, { curtidas: isCurrentlyLiked ? firebase.firestore.FieldValue.arrayRemove(currentUser.uid) : firebase.firestore.FieldValue.arrayUnion(currentUser.uid), });
+        // Atualização otimista da UI
+        setIsFollowing(!isFollowing);
+
+        const userRef = db.collection("users").doc(currentUser.uid);
+        const targetRef = db.collection("users").doc(authorData.uid);
         
-        if (!isCurrentlyLiked && review.uidAutor !== currentUser.uid) {
+        const batch = db.batch();
+        
+        if (isFollowing) { // Se ESTAVA seguindo, agora vai DEIXAR de seguir
+            batch.update(userRef, { seguindo: firebase.firestore.FieldValue.arrayRemove(authorData.uid) });
+            batch.update(targetRef, { seguidores: firebase.firestore.FieldValue.arrayRemove(currentUser.uid) });
+        } else { // Se NÃO ESTAVA seguindo, agora vai SEGUIR
+            batch.update(userRef, { seguindo: firebase.firestore.FieldValue.arrayUnion(authorData.uid) });
+            batch.update(targetRef, { seguidores: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) });
+            
+            // Criar notificação
             const notificationRef = db.collection("notifications").doc();
-            batch.set(notificationRef, { recipientId: review.uidAutor, senderId: currentUser.uid, type: 'like', reviewId: review.id, mediaId: review.movieId, mediaType: review.mediaType || 'movie', read: false, timestamp: firebase.firestore.FieldValue.serverTimestamp(), });
+            batch.set(notificationRef, { recipientId: authorData.uid, senderId: currentUser.uid, type: 'follow', read: false, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
         }
-        await batch.commit().catch(error => { console.error("Erro ao curtir:", error); setReview(prev => ({ ...prev, curtidas: likes })); });
+        
+        try {
+            await batch.commit();
+        } catch (error) {
+            console.error("Erro ao seguir/deixar de seguir:", error);
+            setIsFollowing(!isFollowing); // Reverte a UI em caso de erro
+        }
+    };
+
+    const handleReaction = async (emoji) => {
+        if (!currentUser) {
+            setShowReactions(false);
+            return;
+        }
+    
+        const reviewRef = db.collection("reviews").doc(review.id);
+        
+        // Usamos uma transação para garantir consistência
+        await db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(reviewRef);
+            if (!doc.exists) throw "Document does not exist!";
+    
+            const currentReactions = doc.data().reactions || {};
+            let userPreviousReaction = null;
+    
+            // Encontra a reação anterior do usuário, se houver
+            for (const key in currentReactions) {
+                if (currentReactions[key].includes(currentUser.uid)) {
+                    userPreviousReaction = key;
+                    break;
+                }
+            }
+    
+            // Remove a reação anterior
+            if (userPreviousReaction) {
+                currentReactions[userPreviousReaction] = currentReactions[userPreviousReaction].filter(uid => uid !== currentUser.uid);
+                if (currentReactions[userPreviousReaction].length === 0) {
+                    delete currentReactions[userPreviousReaction];
+                }
+            }
+    
+            // Adiciona a nova reação (se não for a mesma que a anterior)
+            if (userPreviousReaction !== emoji) {
+                if (!currentReactions[emoji]) {
+                    currentReactions[emoji] = [];
+                }
+                currentReactions[emoji].push(currentUser.uid);
+    
+                // Envia notificação apenas se for uma nova reação (não um "deslike")
+                if (review.uidAutor !== currentUser.uid) {
+                    const notificationRef = db.collection("notifications").doc();
+                    transaction.set(notificationRef, { recipientId: review.uidAutor, senderId: currentUser.uid, type: 'like', reviewId: review.id, mediaId: review.movieId, mediaType: review.mediaType || 'movie', read: false, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+                }
+            }
+    
+            transaction.update(reviewRef, { reactions: currentReactions });
+        });
     };
 
     const confirmDeleteReview = async () => {
@@ -145,7 +220,17 @@ const ReviewCard = ({ review: initialReview }) => {
 
     if (!authorData) return <div className="bg-gray-800/50 border border-gray-700 p-4 rounded-lg animate-pulse h-64 mb-4"></div>;
 
-    const isLiked = currentUser && (review.curtidas || []).includes(currentUser.uid);
+    // Lógica para reações
+    const reactions = review.reactions || {};
+    const userReaction = currentUser ? Object.keys(reactions).find(emoji => reactions[emoji].includes(currentUser.uid)) : null;
+    const sortedReactions = Object.entries(reactions)
+        .filter(([emoji, uids]) => uids && uids.length > 0)
+        .sort((a, b) => b[1].length - a[1].length);
+    
+    // O total de reações é a soma de todos os UIDs em todas as reações
+    const totalReactions = Object.values(reactions).reduce((acc, uids) => acc + (uids?.length || 0), 0);
+
+
     const avatarSrc = getAvatarUrl(authorData.foto, authorData.nome);
     const isOwner = currentUser && currentUser.uid === review.uidAutor;
     const posterUrl = getCorsUrl(review.moviePoster);
@@ -180,6 +265,17 @@ const ReviewCard = ({ review: initialReview }) => {
                         </div>
                     </div>
 
+                    {/* 6. Botão de Seguir condicional */}
+                    {currentUser && !isOwner && activeTab === 'paraVoce' && (
+                        <button 
+                            onClick={handleFollow}
+                            className={`ml-4 text-xs font-bold px-3 py-1 rounded-full transition-colors ${
+                                isFollowing ? 'bg-gray-700 text-gray-300 hover:bg-red-800/50 hover:text-red-400' : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                            }`}
+                        >
+                            {isFollowing ? 'Seguindo' : 'Seguir'}
+                        </button>
+                    )}
                     <div className="flex items-center gap-2">
                          {/* Botão Share */}
                         <button onClick={(e) => { e.stopPropagation(); handleShare(); }} className="text-gray-400 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors" title="Compartilhar" data-html2canvas-ignore="true">
@@ -246,15 +342,26 @@ const ReviewCard = ({ review: initialReview }) => {
 
                 {/* 4. FOOTER: Ações */}
                 <div className="mt-4 pt-4 border-t border-white/5 flex items-center gap-6" data-html2canvas-ignore="true">
-                    <button 
-                        onClick={handleLike} 
-                        className={`flex items-center gap-2 text-sm font-medium transition-all duration-200 group/like ${isLiked ? 'text-red-400' : 'text-gray-400 hover:text-gray-200'}`}
-                    >
-                        <div className={`p-2 rounded-full transition-colors ${isLiked ? 'bg-red-500/10' : 'bg-transparent group-hover/like:bg-gray-800'}`}>
-                            <HeartIcon className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`}/>
-                        </div>
-                        <span>{review.curtidas?.length || 0}</span>
-                    </button>
+                    <div className="relative">
+                        <button 
+                            onClick={() => setShowReactions(!showReactions)} 
+                            className={`flex items-center gap-2 text-sm font-medium transition-all duration-200 group/like ${userReaction ? 'text-indigo-400' : 'text-gray-400 hover:text-gray-200'}`}
+                        >
+                            <div className={`p-2 rounded-full transition-colors ${userReaction ? 'bg-indigo-500/10' : 'bg-transparent group-hover/like:bg-gray-800'}`}>
+                                {userReaction ? <span className="text-xl">{userReaction}</span> : <HeartIcon className="w-5 h-5"/>}
+                            </div>
+                            <div className="flex items-center">
+                                {sortedReactions.slice(0, 3).map(([emoji]) => <span key={emoji} className="text-xs -ml-1">{emoji}</span>)}
+                                <span className="ml-1.5">{totalReactions}</span>
+                            </div>
+                        </button>
+                        {showReactions && (
+                            <ReactionPicker 
+                                onSelect={handleReaction} 
+                                onClose={() => setShowReactions(false)} 
+                            />
+                        )}
+                    </div>
                     
                     <button 
                         onClick={() => setShowComments(!showComments)} 

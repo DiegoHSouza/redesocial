@@ -14,7 +14,16 @@ const BottomNavBar = () => {
     };
 
     const navItems = [
-        { path: '/feed', label: 'Feed', icon: HomeIcon },
+        { 
+            path: '/feed', 
+            label: 'Feed', 
+            icon: HomeIcon, 
+            action: () => {
+                if (location.pathname === '/feed' && window.scrollY > 0) {
+                    window.scrollTo({ top: 0, behavior: 'smooth' }); // Apenas rola para o topo
+                } else navigate('/feed');
+            }
+        },
         { path: '/home', label: 'Explorar', icon: LayoutGridIcon },
         { path: '/search', label: 'Buscar', icon: SearchIcon },
         { path: '/friends', label: 'Amigos', icon: UsersIcon },
@@ -30,7 +39,7 @@ const BottomNavBar = () => {
                 {navItems.map(item => (
                     <button
                         key={item.label}
-                        onClick={() => navigate(item.path)}
+                        onClick={item.action || (() => navigate(item.path))}
                         className={`relative flex flex-col items-center justify-center w-full py-2 transition-all duration-300 rounded-xl ${
                             isActive(item.path) ? 'text-white' : 'text-gray-500'
                         }`}
