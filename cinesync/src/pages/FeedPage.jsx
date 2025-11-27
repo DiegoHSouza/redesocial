@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../services/firebaseConfig';
-import firebase from 'firebase/compat/app';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Componentes
 import ReviewCard from '../components/ReviewCard';
 import ListCard from '../components/ListCard';
-// CORREÇÃO: Importando da pasta components em vez de ./ (pasta atual)
 import AchievementCard from '../components/AchievementCard'; 
 import AdSenseBlock from '../components/AdSenseBlock';
 import { Spinner } from '../components/Common';
+
+// Aumentamos para 15 para garantir que a tela sempre tenha scroll suficiente
+const POSTS_PER_PAGE = 15;
 
 const FeedPage = () => {
     const navigate = useNavigate();
@@ -23,177 +24,182 @@ const FeedPage = () => {
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
-    const [lastDoc, setLastDoc] = useState(null); // Armazena o Timestamp para paginação
+    
+    // Armazena o último doc para paginação correta do Firestore
+    const [lastDocs, setLastDocs] = useState({ review: null, list: null, achievement: null });
     
     const observer = useRef();
-    const POSTS_PER_PAGE = 5;
 
-    // --- CARREGAMENTO INICIAL ---
-    useEffect(() => {
-        setLoading(true);
-        setFeed([]);
-        setLastDoc(null);
-        setHasMore(true);
-    
-        const fetchInitialFeed = async () => {
+    // --- HELPER: Busca dados de uma coleção específica ---
+    const fetchCollection = async (collectionName, type, followedUsers, lastDoc = null) => {
+        let query = db.collection(collectionName);
+        
+        const dateField = collectionName === 'lists' ? 'createdAt' : 'timestamp';
+        query = query.orderBy(dateField, "desc");
+
+        if (activeTab === 'seguindo') {
+            if (!followedUsers || followedUsers.length === 0) return { data: [], last: null };
+            query = query.where("uidAutor", "in", followedUsers);
+        }
+
+        if (lastDoc) {
+            query = query.startAfter(lastDoc);
+        }
+
+        const snap = await query.limit(POSTS_PER_PAGE).get();
+        
+        const data = snap.docs.map(doc => ({
+            id: doc.id,
+            type: type,
+            timestamp: doc.data()[dateField], 
+            ...doc.data(),
+            _doc: doc // Guardamos a referência do doc para paginação precisa
+        }));
+
+        return { 
+            data, 
+            last: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null,
+            count: snap.docs.length
+        };
+    };
+
+    // --- HELPER: Popula autores ---
+    const enrichWithAuthors = async (items) => {
+        const authorIds = [...new Set(items.map(item => item.uidAutor))];
+        const authors = {};
+
+        if (authorIds.length > 0) {
+            try {
+                const authorPromises = authorIds.map(id => db.collection('users').doc(id).get());
+                const authorDocs = await Promise.all(authorPromises);
+                authorDocs.forEach(doc => {
+                    if (doc.exists) authors[doc.id] = { uid: doc.id, ...doc.data() };
+                });
+            } catch (e) {
+                console.error("Erro autores:", e);
+            }
+        }
+
+        return items
+            .map(item => ({ ...item, authorInfo: authors[item.uidAutor] }))
+            .filter(item => item.authorInfo);
+    };
+
+    // --- CORE: Carregamento Inteligente ---
+    const loadFeedData = useCallback(async (isInitialLoad = true, currentLastDocs = null) => {
+        try {
             let followedUsers = [];
             
-            // Lógica da aba "Seguindo"
             if (activeTab === 'seguindo') {
                 if (!currentUser || !userData?.seguindo || userData.seguindo.length === 0) {
-                    setFeed([]);
-                    setHasMore(false);
-                    setLoading(false);
+                    if (isInitialLoad) { setFeed([]); setHasMore(false); setLoading(false); }
+                    else { setLoadingMore(false); }
                     return;
-                }
-                followedUsers = userData.seguindo.slice(0, 30); // Limite do Firestore para operador 'in'
-            }
-    
-            // 1. Buscar Reviews
-            let reviewsQuery = db.collection("reviews");
-            if (activeTab === 'seguindo') reviewsQuery = reviewsQuery.where("uidAutor", "in", followedUsers);
-            const reviewsSnap = await reviewsQuery.orderBy("timestamp", "desc").limit(POSTS_PER_PAGE).get();
-            const reviewsData = reviewsSnap.docs.map(doc => ({ id: doc.id, type: 'review', timestamp: doc.data().timestamp, ...doc.data() }));
-    
-            // 2. Buscar Listas
-            let listsQuery = db.collection("lists");
-            if (activeTab === 'seguindo') listsQuery = listsQuery.where("uidAutor", "in", followedUsers);
-            const listsSnap = await listsQuery.orderBy("createdAt", "desc").limit(POSTS_PER_PAGE).get();
-            // Normaliza 'createdAt' para 'timestamp' para ordenação unificada
-            const listsData = listsSnap.docs.map(doc => ({ id: doc.id, type: 'list', timestamp: doc.data().createdAt, ...doc.data() }));
-    
-            // 3. Buscar Conquistas
-            let achievementsQuery = db.collection("achievements");
-            if (activeTab === 'seguindo') achievementsQuery = achievementsQuery.where("uidAutor", "in", followedUsers);
-            const achievementsSnap = await achievementsQuery.orderBy("timestamp", "desc").limit(POSTS_PER_PAGE).get();
-            const achievementsData = achievementsSnap.docs.map(doc => ({ id: doc.id, type: 'achievement', ...doc.data() }));
-
-            // 4. Combinar e Ordenar
-            let combinedFeed = [...reviewsData, ...listsData, ...achievementsData];
-            combinedFeed.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
-            combinedFeed = combinedFeed.slice(0, POSTS_PER_PAGE);
-    
-            if (combinedFeed.length === 0) {
-                 setFeed([]);
-                 setHasMore(false);
-                 setLoading(false);
-                 return;
-            }
-    
-            // 5. Popular autores (Populate)
-            const authorIds = [...new Set(combinedFeed.map(item => item.uidAutor))];
-            const authors = {};
-            if (authorIds.length > 0) {
-                try {
-                    const authorPromises = authorIds.map(id => db.collection('users').doc(id).get());
-                    const authorDocs = await Promise.all(authorPromises);
-                    authorDocs.forEach(doc => { if (doc.exists) authors[doc.id] = doc.data(); });
-                } catch (e) { console.error(e); }
-            }
-    
-            const feedWithAuthors = combinedFeed
-                .map(item => ({ ...item, authorInfo: authors[item.uidAutor] }))
-                .filter(item => item.authorInfo); // Remove itens sem autor (segurança)
-    
-            setFeed(feedWithAuthors);
-            
-            // Define o cursor para a próxima página (Timestamp do último item)
-            if (feedWithAuthors.length > 0) {
-                setLastDoc(feedWithAuthors[feedWithAuthors.length - 1].timestamp);
-            }
-            setHasMore(feedWithAuthors.length === POSTS_PER_PAGE);
-            setLoading(false);
-        };
-    
-        fetchInitialFeed().catch(error => {
-            console.error("Erro ao buscar feed:", error);
-            setLoading(false);
-        });
-
-    }, [activeTab, userData, currentUser]);
-
-    // --- CARREGAR MAIS (PAGINAÇÃO) ---
-    const loadMore = useCallback(() => {
-        if (loadingMore || !hasMore || !lastDoc) return;
-        setLoadingMore(true);
-
-        const fetchMoreData = async () => {
-            let followedUsers = [];
-            if (activeTab === 'seguindo') {
-                if (!userData || !userData.seguindo || userData.seguindo.length === 0) {
-                    setLoadingMore(false); return;
                 }
                 followedUsers = userData.seguindo.slice(0, 30);
             }
 
-            // O cursor é o Timestamp do último item carregado
-            const cursor = lastDoc;
+            // Pega os cursores atuais (ou null se for inicio)
+            const cursors = currentLastDocs || { review: null, list: null, achievement: null };
 
-            // 1. Mais Reviews
-            let reviewsQuery = db.collection("reviews").orderBy("timestamp", "desc").startAfter(cursor).limit(POSTS_PER_PAGE);
-            if (activeTab === 'seguindo') reviewsQuery = reviewsQuery.where("uidAutor", "in", followedUsers);
-            const reviewsSnap = await reviewsQuery.get();
-            const newReviews = reviewsSnap.docs.map(doc => ({ id: doc.id, type: 'review', timestamp: doc.data().timestamp, ...doc.data() }));
+            // 1. Busca Paralela
+            const [reviewsRes, listsRes, achvRes] = await Promise.all([
+                fetchCollection('reviews', 'review', followedUsers, cursors.review),
+                fetchCollection('lists', 'list', followedUsers, cursors.list),
+                fetchCollection('achievements', 'achievement', followedUsers, cursors.achievement)
+            ]);
 
-            // 2. Mais Listas
-            let listsQuery = db.collection("lists").orderBy("createdAt", "desc").startAfter(cursor).limit(POSTS_PER_PAGE);
-            if (activeTab === 'seguindo') listsQuery = listsQuery.where("uidAutor", "in", followedUsers);
-            const listsSnap = await listsQuery.get();
-            const newLists = listsSnap.docs.map(doc => ({ id: doc.id, type: 'list', timestamp: doc.data().createdAt, ...doc.data() }));
+            // 2. Combina tudo
+            let combinedFeed = [...reviewsRes.data, ...listsRes.data, ...achvRes.data];
 
-            // 3. Mais Conquistas
-            let achievementsQuery = db.collection("achievements").orderBy("timestamp", "desc").startAfter(cursor).limit(POSTS_PER_PAGE);
-            if (activeTab === 'seguindo') achievementsQuery = achievementsQuery.where("uidAutor", "in", followedUsers);
-            const achievementsSnap = await achievementsQuery.get();
-            const newAchievements = achievementsSnap.docs.map(doc => ({ id: doc.id, type: 'achievement', ...doc.data() }));
+            // 3. Filtro de "Para Você" (Esconde posts do próprio user)
+            if (activeTab === 'paraVoce' && currentUser) {
+                combinedFeed = combinedFeed.filter(item => item.uidAutor !== currentUser.uid);
+            }
 
-            // 4. Combinar
-            let combinedNewFeed = [...newReviews, ...newLists, ...newAchievements];
-            combinedNewFeed.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
-            combinedNewFeed = combinedNewFeed.slice(0, POSTS_PER_PAGE);
+            // Filtro de duplicatas (segurança)
+            if (!isInitialLoad) {
+                const existingIds = new Set(feed.map(item => item.id));
+                combinedFeed = combinedFeed.filter(item => !existingIds.has(item.id));
+            }
 
-             if (combinedNewFeed.length === 0) {
-                 setHasMore(false);
-                 setLoadingMore(false);
-                 return;
-             }
-             
-             // 5. Popular Autores
-             const authorIds = [...new Set(combinedNewFeed.map(item => item.uidAutor))];
-             const authors = {};
-             if (authorIds.length > 0) {
-                 const authorPromises = authorIds.map(id => db.collection('users').doc(id).get());
-                 const authorDocs = await Promise.all(authorPromises);
-                 authorDocs.forEach(doc => {
-                     if (doc.exists) authors[doc.id] = doc.data();
-                 });
-             }
-             
-             const newFeedWithAuthors = combinedNewFeed
-                .map(item => ({ ...item, authorInfo: authors[item.uidAutor] }))
-                .filter(item => item.authorInfo);
+            // 4. Ordenação
+            combinedFeed.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
 
-             setFeed(prev => [...prev, ...newFeedWithAuthors]);
-             
-             if (newFeedWithAuthors.length > 0) {
-                setLastDoc(newFeedWithAuthors[newFeedWithAuthors.length - 1].timestamp);
-             }
-             setHasMore(newFeedWithAuthors.length === POSTS_PER_PAGE);
-             setLoadingMore(false);
-        };
+            // CORREÇÃO CRÍTICA DO SCROLL INFINITO:
+            // Verificamos se ALGUMA das coleções retornou o lote cheio. 
+            // Se sim, significa que ainda tem lenha pra queimar no banco.
+            const rawHitLimit = 
+                reviewsRes.count === POSTS_PER_PAGE || 
+                listsRes.count === POSTS_PER_PAGE || 
+                achvRes.count === POSTS_PER_PAGE;
 
-        fetchMoreData().catch(error => { console.error("Erro ao carregar mais:", error); setLoadingMore(false); });
-    }, [loadingMore, hasMore, lastDoc, activeTab, userData]);
+            // 5. Autores
+            const finalFeed = await enrichWithAuthors(combinedFeed);
 
-    // Intersection Observer para Infinite Scroll
+            // 6. Atualização de Estado
+            if (isInitialLoad) {
+                setFeed(finalFeed);
+            } else {
+                setFeed(prev => [...prev, ...finalFeed]);
+            }
+
+            // Atualiza os cursores para a próxima chamada
+            setLastDocs({
+                review: reviewsRes.last || cursors.review, // Se não veio nada novo, mantém o antigo
+                list: listsRes.last || cursors.list,
+                achievement: achvRes.last || cursors.achievement
+            });
+            
+            // Define se tem mais com base no retorno RAW do banco, não no filtrado
+            setHasMore(rawHitLimit);
+
+            // AUTO-RECOVERY: Se filtramos tudo e sobrou 0 na tela, mas tem mais no banco, carrega de novo automaticamente
+            if (finalFeed.length === 0 && rawHitLimit) {
+                // Recursividade segura: chama loadMore (que chamará essa função novamente)
+                // Usamos timeout 0 para jogar para o fim da pilha de execução e evitar travamento
+                setTimeout(() => {
+                   if(isInitialLoad) loadFeedData(false, {
+                       review: reviewsRes.last, list: listsRes.last, achievement: achvRes.last
+                   });
+                }, 0);
+            }
+
+        } catch (error) {
+            console.error("Feed error:", error);
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
+        }
+    }, [activeTab, currentUser, userData, feed]);
+
+    // --- EFFECT: Init ---
+    useEffect(() => {
+        setLoading(true);
+        setFeed([]);
+        setLastDocs({ review: null, list: null, achievement: null });
+        setHasMore(true);
+        loadFeedData(true, null);
+    }, [activeTab]); 
+
+    // --- HANDLER ---
+    const loadMore = () => {
+        if (loadingMore || !hasMore) return;
+        setLoadingMore(true);
+        loadFeedData(false, lastDocs);
+    };
+
+    // --- OBSERVER ---
     const lastPostElementRef = useCallback(node => {
         if (loading || loadingMore) return;
         if (observer.current) observer.current.disconnect();
         observer.current = new IntersectionObserver(entries => {
-            if (entries[0].isIntersecting && hasMore) loadMore();
+            if (entries[0].isIntersecting && hasMore) {
+                loadMore();
+            }
         });
         if (node) observer.current.observe(node);
-    }, [loading, loadingMore, hasMore, loadMore]);
+    }, [loading, loadingMore, hasMore]);
 
     return (
         <div className="container mx-auto p-4 md:p-8">
@@ -236,13 +242,13 @@ const FeedPage = () => {
                             {feed.length > 0 ? (
                                 <div className="max-w-2xl mx-auto">
                                     {feed.map((item, index) => {
-                                        const showAd = (index + 1) % 5 === 0; // Mostra um anúncio a cada 5 posts
+                                        const showAd = (index + 1) % 5 === 0;
                                         return (
                                             <React.Fragment key={`${item.id}-${index}`}>
                                                 <motion.div 
                                                     initial={{ opacity: 0, y: 20 }}
                                                     animate={{ opacity: 1, y: 0 }}
-                                                    transition={{ delay: (index % POSTS_PER_PAGE) * 0.1 }}
+                                                    transition={{ delay: 0.1 }}
                                                     ref={feed.length === index + 1 ? lastPostElementRef : null}
                                                     className={item.type === 'review' ? 'mb-8' : 'mb-6'}
                                                 >
@@ -250,44 +256,34 @@ const FeedPage = () => {
                                                     {item.type === 'list' && <ListCard list={item} />}
                                                     {item.type === 'achievement' && <AchievementCard achievement={item} />}
                                                 </motion.div>
-                                                {showAd && (
-                                                    <AdSenseBlock adSlot="YOUR_AD_SLOT_ID" />
-                                                )}
+                                                {showAd && <AdSenseBlock adSlot="YOUR_AD_SLOT_ID" />}
                                             </React.Fragment>
                                         )
                                     })}
                                 </div>
                             ) : (
-                                activeTab === 'seguindo' ? (
-                                    <motion.div 
-                                        initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-                                        className="text-center text-gray-400 bg-gray-800/50 border border-gray-700 p-12 rounded-2xl max-w-lg mx-auto"
+                                <motion.div 
+                                    initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+                                    className="text-center text-gray-400 bg-gray-800/50 border border-gray-700 p-12 rounded-2xl max-w-lg mx-auto"
+                                >
+                                    <h3 className="text-xl font-bold mb-2 text-white">
+                                        {activeTab === 'seguindo' ? 'Seu feed está vazio!' : 'Ainda não há atividades.'}
+                                    </h3>
+                                    <p className="leading-relaxed mb-6">
+                                        {activeTab === 'seguindo' 
+                                            ? 'Siga seus amigos para ver as atividades deles.'
+                                            : 'Explore filmes e crie a primeira review!'}
+                                    </p>
+                                    <button 
+                                        onClick={() => navigate(activeTab === 'seguindo' ? '/friends' : '/home')} 
+                                        className="bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-indigo-500 transition-all shadow-lg"
                                     >
-                                        <h3 className="text-xl font-bold mb-2 text-white">Seu feed está vazio!</h3>
-                                        <p className="leading-relaxed mb-6">Siga seus amigos para ver o que eles estão assistindo e avaliando.</p>
-                                        <button onClick={() => navigate('/friends')} className="bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-indigo-500 transition-all shadow-lg hover:shadow-indigo-500/20">
-                                            Descobrir Pessoas
-                                        </button>
-                                    </motion.div>
-                                ) : (
-                                     <motion.div 
-                                        initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-                                        className="text-center text-gray-400 bg-gray-800/50 border border-gray-700 p-12 rounded-2xl max-w-lg mx-auto"
-                                    >
-                                        <h3 className="text-xl font-bold mb-2 text-white">Nada por aqui.</h3>
-                                        <p className="leading-relaxed mb-6">Parece que não há novas avaliações na plataforma. Que tal ser o primeiro?</p>
-                                         <button onClick={() => navigate('/home')} className="bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 px-6 rounded-xl hover:opacity-90 transition-all shadow-lg">
-                                            Explorar Filmes
-                                        </button>
-                                    </motion.div>
-                                )
+                                        {activeTab === 'seguindo' ? 'Descobrir Pessoas' : 'Explorar Filmes'}
+                                    </button>
+                                </motion.div>
                             )}
                             
                             {loadingMore && <div className="py-8"><Spinner /></div>}
-                            
-                            {!loading && !hasMore && feed.length > 0 && (
-                                <p className="text-center text-gray-600 mt-8 text-sm">Isso é tudo por enquanto.</p>
-                            )}
                         </>
                     )}
                 </motion.div>

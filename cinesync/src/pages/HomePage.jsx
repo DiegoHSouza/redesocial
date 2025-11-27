@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { tmdbApi, TMDB_IMAGE_URL } from '../services/tmdbApi';
+import { registerRandomPickerXP } from "../utils/gamification"; // <--- AJUSTE O CAMINHO SE NECESSÁRIO
 import RandomPicker from '../components/RandomPicker';
-import { HeartIcon, DiceIcon, LayoutGridIcon, UsersIcon } from '../components/Icons'; // <--- Adicionei UsersIcon
+import { HeartIcon, DiceIcon, LayoutGridIcon, UsersIcon } from '../components/Icons';
 
 const STREAMING_SERVICES = [
     { id: 8, name: 'Netflix', logo: '/logos/netflix.svg', color: 'shadow-red-500/40' },
@@ -28,6 +29,12 @@ const HomePage = () => {
         } else {
             navigate(`/catalog/${service.id}?name=${service.name}`);
         }
+    };
+
+    // --- NOVO: Handler para registrar XP quando usar a roleta ---
+    const handleRouletteUsed = async () => {
+        console.log("Sorteador utilizado! Registrando XP...");
+        await registerRandomPickerXP();
     };
 
     return (
@@ -97,7 +104,8 @@ const HomePage = () => {
                 {/* ABA 2: ROLETA */}
                 {activeTab === 'roulette' && (
                     <div className="animate-fade-in py-2 md:py-4">
-                        <RandomPicker />
+                        {/* Passamos a função handleRouletteUsed via prop 'onSpin' */}
+                        <RandomPicker onSpin={handleRouletteUsed} />
                     </div>
                 )}
 
@@ -121,7 +129,7 @@ const HomePage = () => {
                     </div>
                 )}
 
-                {/* ABA 4: CLUBES (NOVA) */}
+                {/* ABA 4: CLUBES */}
                 {activeTab === 'clubs' && (
                     <div className="animate-fade-in py-4 md:py-8 flex flex-col items-center">
                          <div 
@@ -174,15 +182,15 @@ const ServiceCard = ({ service, onClick }) => {
     }, [service.id, service.name]);
 
     useEffect(() => {
-        if (posters.length <= 1) return; // Não roda o intervalo se não tiver imagens suficientes
+        if (posters.length <= 1) return;
 
         const intervalId = setInterval(() => {
-            setIsFading(true); // Inicia o fade-out da imagem antiga
+            setIsFading(true);
             setTimeout(() => {
                 setActivePosterIndex((prevIndex) => (prevIndex + 1) % posters.length);
-                setIsFading(false); // Inicia o fade-in da nova imagem
-            }, 1000); // Duração do fade-out (deve ser igual à transição de opacidade)
-        }, 6000); // Tempo total: 5s visível + 1s de transição
+                setIsFading(false);
+            }, 1000);
+        }, 6000);
 
         return () => clearInterval(intervalId);
     }, [posters]);
@@ -195,21 +203,17 @@ const ServiceCard = ({ service, onClick }) => {
             onClick={onClick}
             className={`group relative bg-black/20 backdrop-blur-md border border-white/10 rounded-2xl p-4 flex items-center justify-center cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl hover:border-white/20 aspect-video overflow-hidden hover:${service.color || 'shadow-indigo-500/30'}`}
         >
-            {/* Camada de Pôster 1 (Atual) */}
             <div
                 className="absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out"
                 style={{ backgroundImage: `url(${currentPoster})`, opacity: isFading ? 0 : 1 }}
             />
-            {/* Camada de Pôster 2 (Próximo) */}
             <div
                 className="absolute inset-0 bg-cover bg-center"
                 style={{ backgroundImage: `url(${nextPoster})`, opacity: 0 }}
             />
 
-            {/* Overlay de Gradiente para legibilidade e cor */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-80 group-hover:opacity-100 transition-opacity duration-300"></div>
 
-            {/* Conteúdo do Card */}
             <div className="relative z-10 flex flex-col items-center justify-center text-center">
                 <h3 className="text-xl md:text-2xl font-bold tracking-tight text-white transition-transform duration-300 group-hover:scale-110" style={{ textShadow: '2px 2px 8px rgba(0,0,0,0.8)' }}>{service.name}</h3>
             </div>

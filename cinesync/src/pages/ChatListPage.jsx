@@ -32,15 +32,15 @@ const ChatListPage = () => {
                 ...doc.data()
             }));
             
-            // Filtrar conversas apenas com seguidores/seguidos
-            const seguindo = userData.seguindo || [];
-            const seguidores = userData.seguidores || [];
-            const allowedIds = new Set([...(seguindo || []), ...(seguidores || [])]);
+            // Recalcula os IDs permitidos a cada atualização
+            const seguindo = userData?.seguindo || [];
+            const seguidores = userData?.seguidores || [];
+            const allowedIds = new Set([...seguindo, ...seguidores]);
 
             const visibleConvos = convos.filter(c => {
                 if (c.deletedBy && c.deletedBy[currentUser.uid]) return false;
                 const otherId = c.participants.find(p => p !== currentUser.uid);
-                return allowedIds.has(otherId);
+                return allowedIds.has(otherId) || !!c.lastMessageTimestamp;
             });
 
             setConversations(visibleConvos);
@@ -51,7 +51,7 @@ const ChatListPage = () => {
         });
 
         return () => unsubscribe();
-    }, [currentUser, userData]);
+    }, [currentUser, userData]); // Manter userData aqui é crucial
 
     const startConversation = async (targetUser) => {
         setShowSearchModal(false);

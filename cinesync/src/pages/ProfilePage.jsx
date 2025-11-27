@@ -9,7 +9,7 @@ import ReviewCard from '../components/ReviewCard';
 import ListCard from '../components/ListCard';
 import UserListModal from '../components/UserListModal'; 
 import EditProfileModal from '../components/EditProfileModal';
-import { calculateLevel, getNextLevelXp, BADGES, triggerUserRecalculation, awardXP } from '../utils/gamification';
+import { calculateLevel, getNextLevelXp, BADGES, triggerUserRecalculation } from '../utils/gamification';
 
 const ProfilePage = () => {
     const { userId } = useParams();
@@ -65,7 +65,6 @@ const ProfilePage = () => {
         };
     }, [userId]);
 
-    // Verifica se segue
     useEffect(() => {
         if (loggedInUserData && profileData) {
             const seguindo = loggedInUserData.seguindo || [];
@@ -96,8 +95,9 @@ const ProfilePage = () => {
             await batch.commit();
             setIsFollowing(!originalFollowingState);
         } catch (error) {
+            setIsFollowingLoading(false);
             console.error("Erro ao seguir/deixar de seguir:", error);
-            setIsFollowing(originalFollowingState); // Reverte em caso de erro
+            setIsFollowing(originalFollowingState);
         }
     };
 
@@ -114,7 +114,7 @@ const ProfilePage = () => {
             const userDocs = await Promise.all(userPromises);
             const usersData = userDocs
                 .filter(docSnap => docSnap.exists)
-                .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+                .map(docSnap => ({ id: docSnap.id, uid: docSnap.id, ...docSnap.data() }));
             setListData(usersData);
         } catch (error) {
             console.error("Erro ao buscar lista de usuários:", error);
@@ -151,8 +151,6 @@ const ProfilePage = () => {
         if (!confirmSync) return;
         
         setIsSyncing(true);
-        // A função triggerUserRecalculation já mostra os alertas de sucesso/erro
-        // e chama a Cloud Function segura que implementamos.
         try {
             await triggerUserRecalculation();
         } catch (error) {
@@ -162,33 +160,109 @@ const ProfilePage = () => {
         }
     };
 
+    // --- LÓGICA DE EVOLUÇÃO DAS MEDALHAS (COM PROGRESSO) ---
+    const getEvolutionaryBadges = (userBadgesIds = [], userStats = {}) => {
+        const groups = {};
+
+        // 1. Agrupa
+        Object.values(BADGES).forEach(badge => {
+            if (badge.type) {
+                if (!groups[badge.type]) groups[badge.type] = [];
+                groups[badge.type].push(badge);
+            }
+        });
+
+        const displayList = [];
+
+        // 2. Processa cada grupo
+        Object.keys(groups).forEach(type => {
+            const family = groups[type].sort((a, b) => a.rank - b.rank);
+            const highestOwned = [...family].reverse().find(b => userBadgesIds.includes(b.id));
+
+            // Determina qual medalha mostrar e qual é o próximo alvo
+            let badgeToShow = highestOwned;
+            let nextBadge = null;
+            
+            if (highestOwned) {
+                // Se tem uma medalha, a próxima é a de rank imediatamente superior
+                const currentIndex = family.findIndex(b => b.id === highestOwned.id);
+                if (currentIndex < family.length - 1) {
+                    nextBadge = family[currentIndex + 1];
+                }
+            } else {
+                // Se não tem nenhuma, mostra a primeira (Bronze) como alvo
+                if (type !== 'LEGACY') {
+                    badgeToShow = family[0];
+                    nextBadge = family[0]; // O alvo é ela mesma (para desbloquear)
+                }
+            }
+
+            if (badgeToShow) {
+                // Calcula progresso se houver um próximo nível
+                let progressInfo = null;
+                
+                if (nextBadge && badgeToShow.statField) {
+                    const currentVal = userStats[badgeToShow.statField] || 0;
+                    const targetVal = nextBadge.limit;
+                    const percent = Math.min(100, Math.floor((currentVal / targetVal) * 100));
+                    
+                    progressInfo = {
+                        current: currentVal,
+                        target: targetVal,
+                        percent: percent
+                    };
+                } 
+                // Caso especial: se já tem a última medalha (Ouro), mostra 100%
+                else if (!nextBadge && highestOwned && badgeToShow.statField) {
+                     const currentVal = userStats[badgeToShow.statField] || 0;
+                     progressInfo = {
+                        current: currentVal,
+                        target: currentVal, // Meta atingida
+                        percent: 100,
+                        isMax: true
+                    };
+                }
+
+                displayList.push({ 
+                    ...badgeToShow, 
+                    unlocked: !!highestOwned, // Se highestOwned existe, está desbloqueada. Se não, é a Bronze bloqueada.
+                    progress: progressInfo
+                });
+            }
+        });
+
+        return displayList;
+    };
+
     if (loading) return <Spinner/>;
     if (!profileData) return <div className="p-8"><ErrorMessage message="Perfil não encontrado." /></div>;
 
     const followersCount = (profileData.seguidores || []).length;
     const followingCount = (profileData.seguindo || []).length;
     
-    // Gamification Data
     const xp = profileData.xp || 0;
     const level = calculateLevel(xp);
     const nextLevelXp = getNextLevelXp(level);
     const prevLevelXp = getNextLevelXp(level - 1) || 0;
     const progress = Math.min(100, Math.max(0, ((xp - prevLevelXp) / (nextLevelXp - prevLevelXp)) * 100));
-    const userBadges = profileData.badges || [];
+    const userBadgesIds = profileData.badges || [];
+    const userStats = profileData.stats || {}; // Pega as estatísticas do usuário
+    
+    // Gera a lista com progresso
+    const displayBadges = getEvolutionaryBadges(userBadgesIds, userStats);
 
     let coverSrc = profileData.fotoCapa;
     if (!coverSrc || (typeof coverSrc === 'string' && coverSrc.startsWith('blob:'))) {
         coverSrc = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1000&q=80';
     }
 
-    // Função para obter a classe da moldura com base no nível
     const getLevelBorderClass = (level) => {
-        if (level >= 40) return 'border-purple-500 shadow-purple-500/40'; // Mestre
-        if (level >= 30) return 'border-cyan-400 shadow-cyan-400/40';   // Diamante
-        if (level >= 20) return 'border-yellow-400 shadow-yellow-400/40'; // Ouro
-        if (level >= 10) return 'border-gray-400 shadow-gray-400/40';    // Prata
-        if (level >= 1) return 'border-yellow-700 shadow-yellow-700/40';     // Bronze
-        return 'border-gray-800'; // Padrão
+        if (level >= 40) return 'border-purple-500 shadow-purple-500/40';
+        if (level >= 30) return 'border-cyan-400 shadow-cyan-400/40';
+        if (level >= 20) return 'border-yellow-400 shadow-yellow-400/40';
+        if (level >= 10) return 'border-gray-400 shadow-gray-400/40';
+        if (level >= 1) return 'border-yellow-700 shadow-yellow-700/40';
+        return 'border-gray-800';
     };
 
     return (
@@ -217,9 +291,7 @@ const ProfilePage = () => {
                 </div>
 
                 <div className="bg-gray-800/50 border border-gray-700 p-6 rounded-b-xl shadow-lg pt-20 md:pt-8">
-                     {/* Botões de ação responsivos */}
                      <div className="flex flex-col md:flex-row justify-end items-stretch md:items-center gap-2 mb-4">
-                        {/* Match Badge */}
                         {currentUser && currentUser.uid !== userId && compatibility !== null && (
                             <div className="bg-gray-900/80 px-3 py-1.5 rounded-lg border border-pink-500/30 flex items-center gap-2 mr-0 md:mr-2 animate-fade-in self-center md:self-auto">
                                 <HeartIcon className="w-4 h-4 text-pink-500" />
@@ -254,12 +326,10 @@ const ProfilePage = () => {
                         )}
                     </div>
 
-                    {/* Informações do Usuário */}
                     <div className="text-center md:text-left md:ml-48">
                         <h2 className="text-2xl md:text-3xl font-bold tracking-tight">{profileData.nome} {profileData.sobrenome}</h2>
                         <p className="text-gray-400">@{profileData.username}</p>
                         
-                        {/* XP Bar + Sync Button */}
                         <div className="mt-3 max-w-xs mx-auto md:mx-0">
                             <div className="flex justify-between text-xs text-gray-400 mb-1 items-center">
                                 <span>{xp} XP</span>
@@ -277,16 +347,14 @@ const ProfilePage = () => {
                             </div>
                         </div>
 
-                        {/* Badges */}
-                        {userBadges.length > 0 && (
+                        {/* Badges no Header (Apenas as desbloqueadas) */}
+                        {displayBadges.length > 0 && (
                             <div className="flex gap-2 mt-3 justify-center md:justify-start">
-                                {userBadges.map(badgeId => {
-                                    const badge = Object.values(BADGES).find(b => b.id === badgeId);
-                                    if (!badge) return null;
-                                    return (
-                                        <span key={badgeId} className="text-lg cursor-help" title={badge.desc}>{badge.icon}</span>
-                                    );
-                                })}
+                                {displayBadges.filter(b => b.unlocked).map(badge => (
+                                    <span key={badge.id} className="text-lg cursor-help hover:scale-110 transition-transform" title={`${badge.name}: ${badge.desc}`}>
+                                        {badge.icon}
+                                    </span>
+                                ))}
                             </div>
                         )}
 
@@ -327,18 +395,19 @@ const ProfilePage = () => {
                     <div className="flex border-b border-gray-700 mb-6">
                         <button onClick={() => setActiveTab('reviews')} className={`py-2 px-4 font-semibold ${activeTab === 'reviews' ? 'text-white border-b-2 border-indigo-500' : 'text-gray-400'}`}>Avaliações</button>
                         <button onClick={() => setActiveTab('lists')} className={`py-2 px-4 font-semibold ${activeTab === 'lists' ? 'text-white border-b-2 border-indigo-500' : 'text-gray-400'}`}>Listas</button>
-                        <button onClick={() => navigate(`/profile/${userId}/achievements`)} className="py-2 px-4 font-semibold text-gray-400">Conquistas</button>
+                        <button onClick={() => setActiveTab('achievements')} className={`py-2 px-4 font-semibold ${activeTab === 'achievements' ? 'text-white border-b-2 border-indigo-500' : 'text-gray-400'}`}>Conquistas</button>
                     </div>
                     
-                    {activeTab === 'reviews' ? (
+                    {activeTab === 'reviews' && (
                         <div className="space-y-8">
                             {reviews.length > 0 ? reviews.map(review => (
                                 <ReviewCard key={review.id} review={review} />
                             )) : <p className="text-gray-400 text-center py-4">Este usuário ainda não fez nenhuma avaliação.</p>}
                         </div>
-                    ) : (
+                    )}
+
+                    {activeTab === 'lists' && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {/* Card para criar nova lista (apenas para o dono do perfil) */}
                             {currentUser && currentUser.uid === userId && (
                                 <div 
                                     onClick={() => navigate('/create-list')}
@@ -351,12 +420,65 @@ const ProfilePage = () => {
                                     <p className="text-sm text-gray-400">Comece uma nova coleção</p>
                                 </div>
                             )}
-                            {/* Mapeamento das listas existentes */}
                             {userLists.map(list => (
                                 <ListCard key={list.id} list={list} />
                             ))}
-                            {/* Mensagem de lista vazia (agora com lógica correta) */}
                             {userLists.length === 0 && <p className="text-gray-400 sm:col-span-2 lg:col-span-3 text-center py-4">Este usuário ainda não criou nenhuma lista.</p>}
+                        </div>
+                    )}
+
+                    {activeTab === 'achievements' && (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-fade-in">
+                            {displayBadges.map(badge => (
+                                <div 
+                                    key={badge.id}
+                                    className={`
+                                        relative p-6 rounded-xl border-2 flex flex-col items-center text-center transition-all overflow-hidden group
+                                        ${badge.unlocked 
+                                            ? 'bg-gray-800 border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.2)]' 
+                                            : 'bg-gray-900/50 border-gray-800 opacity-60 grayscale'
+                                        }
+                                    `}
+                                >
+                                    <div className="text-5xl mb-3 drop-shadow-md">{badge.icon}</div>
+                                    <h3 className={`font-bold text-lg ${badge.unlocked ? 'text-white' : 'text-gray-500'}`}>
+                                        {badge.name}
+                                    </h3>
+                                    <p className="text-xs text-gray-400 mt-2 z-10 relative">{badge.desc}</p>
+                                    
+                                    {/* Etiqueta de Nível */}
+                                    {badge.unlocked && badge.rank > 0 && (
+                                        <div className="absolute top-2 right-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-[10px] font-bold rounded-full border border-yellow-500/30">
+                                            NV {badge.rank}
+                                        </div>
+                                    )}
+                                    
+                                    {/* Etiqueta de Bloqueado */}
+                                    {!badge.unlocked && (
+                                        <div className="absolute top-2 right-2 px-2 py-0.5 bg-gray-700/50 text-gray-400 text-[10px] font-bold rounded-full">
+                                            Bloqueado
+                                        </div>
+                                    )}
+
+                                    {/* BARRA DE PROGRESSO (NOVIDADE) */}
+                                    {badge.progress && (
+                                        <div className="w-full mt-4">
+                                            <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                                                <span>Progresso</span>
+                                                <span className={badge.progress.isMax ? "text-yellow-400 font-bold" : ""}>
+                                                    {badge.progress.isMax ? "MÁXIMO" : `${badge.progress.current}/${badge.progress.target}`}
+                                                </span>
+                                            </div>
+                                            <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                                <div 
+                                                    className={`h-1.5 rounded-full transition-all duration-1000 ${badge.progress.isMax ? 'bg-yellow-500' : 'bg-indigo-500'}`} 
+                                                    style={{ width: `${badge.progress.percent}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>

@@ -6,7 +6,7 @@ firebase.initializeApp({
   apiKey: "AIzaSyBPYi1AUEmrLKpqKhZ5fchjIjrXeo4b82E",
   authDomain: "cineverse-e19c0.firebaseapp.com",
   projectId: "cineverse-e19c0",
-  storageBucket: "cineverse-e19c0.appspot.com",
+  storageBucket: "cineverse-e19c0.firebasestorage.app",
   messagingSenderId: "42234002500",
   appId: "1:42234002500:web:6b95f67a8c195249011d87",
   measurementId: "G-YFJBMRER79"

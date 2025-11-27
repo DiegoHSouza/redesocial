@@ -4,8 +4,9 @@ import { db } from '../services/firebaseConfig';
 import firebase from 'firebase/compat/app';
 import { useAuth } from '../contexts/AuthContext';
 import { SendIcon, PencilIcon, TrashIcon, CheckIcon, CloseIcon } from '../components/Icons';
-import { getAvatarUrl } from '../components/Common';
-import ConfirmModal from '../components/ConfirmModal'; // <--- 1. Importado
+import { getAvatarUrl, Spinner } from '../components/Common';
+import ConfirmModal from '../components/ConfirmModal';
+import MovieInviteCard from '../components/MovieInviteCard';
 
 const ChatPage = () => {
     const { conversationId } = useParams();
@@ -14,6 +15,7 @@ const ChatPage = () => {
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState("");
     const [conversation, setConversation] = useState(null);
+    const [participantDetails, setParticipantDetails] = useState({}); // Para guardar detalhes dos usuários
     const [editingMessage, setEditingMessage] = useState(null);
     const messagesEndRef = useRef(null);
 
@@ -23,9 +25,29 @@ const ChatPage = () => {
 
     useEffect(() => {
         const convoRef = db.collection("conversations").doc(conversationId);
-        const unsubConvo = convoRef.onSnapshot(doc => {
-            if (doc.exists) setConversation(doc.data());
-            else navigate('/chats');
+        const unsubConvo = convoRef.onSnapshot(async (doc) => {
+            if (doc.exists) {
+                const convoData = doc.data();
+                setConversation(convoData);
+
+                // Busca detalhes dos participantes se ainda não tiver
+                const participantIds = convoData.participants || [];
+                const missingDetails = participantIds.filter(id => !participantDetails[id]);
+                
+                if (missingDetails.length > 0) {
+                    const newDetails = {};
+                    for (const id of missingDetails) {
+                        const userDoc = await db.collection('users').doc(id).get();
+                        if (userDoc.exists) {
+                            newDetails[id] = userDoc.data();
+                        }
+                    }
+                    setParticipantDetails(prev => ({ ...prev, ...newDetails }));
+                }
+
+            } else {
+                navigate('/chats');
+            }
         });
         
         const messagesRef = convoRef.collection("messages").orderBy("timestamp", "asc");
@@ -34,7 +56,7 @@ const ChatPage = () => {
         });
 
         return () => { unsubConvo(); unsubMessages(); };
-    }, [conversationId, navigate]);
+    }, [conversationId, navigate, participantDetails]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -90,7 +112,7 @@ const ChatPage = () => {
     };
 
     const otherParticipantId = conversation?.participants.find(p => p !== currentUser?.uid);
-    const otherParticipantInfo = otherParticipantId && conversation?.participantInfo ? conversation.participantInfo[otherParticipantId] : null;
+    const otherParticipantInfo = otherParticipantId ? participantDetails[otherParticipantId] : null;
 
     const historyClearedAt = conversation?.historyClearedAt?.[currentUser.uid]?.seconds || 0;
 
@@ -103,13 +125,16 @@ const ChatPage = () => {
         <div className="h-[calc(100vh-65px)] md:h-[calc(100vh-81px)] flex flex-col container mx-auto">
             <div className="p-4 border-b border-gray-700 flex items-center space-x-4 bg-gray-900/80 backdrop-blur-lg sticky top-0 z-10">
                 <button onClick={() => navigate(`/profile/${otherParticipantId}`)} className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
-                    <img 
-                        src={getAvatarUrl(otherParticipantInfo?.foto, otherParticipantInfo?.nome)} 
-                        className="w-10 h-10 rounded-full object-cover" 
-                        alt="" 
-                        onError={(e) => { e.target.onerror = null; e.target.src=getAvatarUrl(null, otherParticipantInfo?.nome); }}
-                    />
-                    <h2 className="text-xl font-bold text-white">{otherParticipantInfo?.nome || "Usuário"}</h2>
+                    {otherParticipantInfo ? (
+                        <>
+                            <img 
+                                src={getAvatarUrl(otherParticipantInfo.foto, otherParticipantInfo.nome)} 
+                                className="w-10 h-10 rounded-full object-cover" 
+                                alt={otherParticipantInfo.nome}
+                            />
+                            <h2 className="text-xl font-bold text-white">{otherParticipantInfo.nome || "Usuário"}</h2>
+                        </>
+                    ) : <Spinner />}
                 </button>
             </div>
             
@@ -124,33 +149,41 @@ const ChatPage = () => {
                 {visibleMessages.map(msg => {
                     const isSender = msg.senderId === currentUser.uid;
                     const isEditingThis = editingMessage?.id === msg.id;
+                    const senderDetails = participantDetails[msg.senderId];
+
                     return (
                         <div key={msg.id} className={`flex items-end gap-2 group ${isSender ? 'justify-end' : 'justify-start'}`}>
-                            {isSender && !msg.deleted && (
+                            {isSender && !msg.deleted && msg.type !== 'movie_invite' && (
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity mb-1">
                                     <button onClick={() => setEditingMessage({ id: msg.id, text: msg.text })} className="text-gray-400 hover:text-white"><PencilIcon className="w-3 h-3" /></button>
                                     <button onClick={() => requestDelete(msg.id)} className="text-gray-400 hover:text-red-400"><TrashIcon className="w-3 h-3" /></button>
                                 </div>
                             )}
-                            <div className={`max-w-[75%] md:max-w-md p-3 rounded-2xl break-words ${isSender ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-gray-700 text-gray-200 rounded-bl-sm'}`}>
-                                {isEditingThis ? (
-                                    <div className="flex items-center gap-2">
-                                        <input 
-                                            type="text" 
-                                            value={editingMessage.text} 
-                                            onChange={(e) => setEditingMessage({...editingMessage, text: e.target.value})} 
-                                            className="bg-indigo-700 text-white p-1 rounded focus:outline-none w-full text-sm" 
-                                            autoFocus 
-                                            onKeyDown={e => e.key === 'Enter' && handleUpdateMessage()} 
-                                        />
-                                        <button onClick={handleUpdateMessage}><CheckIcon className="w-4 h-4 text-green-300"/></button>
-                                        <button onClick={() => setEditingMessage(null)}><CloseIcon className="w-4 h-4 text-red-300"/></button>
-                                    </div>
-                                ) : (
-                                    <p className={`text-sm md:text-base ${msg.deleted ? 'italic text-white/50' : ''}`}>{msg.text}</p>
-                                )}
-                                {msg.edited && !msg.deleted && <span className="text-[10px] text-white/60 block text-right mt-1">(editado)</span>}
-                            </div>
+
+                            {/* RENDERIZAÇÃO CONDICIONAL */}
+                            {msg.type === 'movie_invite' ? (
+                                <MovieInviteCard movie={msg.movie} senderName={senderDetails?.nome} />
+                            ) : (
+                                <div className={`max-w-[75%] md:max-w-md p-3 rounded-2xl break-words ${isSender ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-gray-700 text-gray-200 rounded-bl-sm'}`}>
+                                    {isEditingThis ? (
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="text" 
+                                                value={editingMessage.text} 
+                                                onChange={(e) => setEditingMessage({...editingMessage, text: e.target.value})} 
+                                                className="bg-indigo-700 text-white p-1 rounded focus:outline-none w-full text-sm" 
+                                                autoFocus 
+                                                onKeyDown={e => e.key === 'Enter' && handleUpdateMessage()} 
+                                            />
+                                            <button onClick={handleUpdateMessage}><CheckIcon className="w-4 h-4 text-green-300"/></button>
+                                            <button onClick={() => setEditingMessage(null)}><CloseIcon className="w-4 h-4 text-red-300"/></button>
+                                        </div>
+                                    ) : (
+                                        <p className={`text-sm md:text-base ${msg.deleted ? 'italic text-white/50' : ''}`}>{msg.text}</p>
+                                    )}
+                                    {msg.edited && !msg.deleted && <span className="text-[10px] text-white/60 block text-right mt-1">(editado)</span>}
+                                </div>
+                            )}
                         </div>
                     );
                 })}

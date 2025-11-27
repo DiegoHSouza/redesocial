@@ -3,9 +3,9 @@ import { tmdbApi } from '../services/tmdbApi';
 import { Spinner } from './Common';
 import { DiceIcon, CloseIcon, ChevronDownIcon } from './Icons';
 import ContentCard from './ContentCard';
-import ConfirmModal from './ConfirmModal'; // <--- Importado
-import { useAuth } from '../contexts/AuthContext'; // Importar useAuth
-import { awardXP, XP_POINTS } from '../utils/gamification'; // Importar gamification
+import ConfirmModal from './ConfirmModal'; 
+import { useAuth } from '../contexts/AuthContext';
+import { awardXP } from '../utils/gamification'; // Mantido conforme seu snippet
 import { useNavigate } from 'react-router-dom';
 
 const STREAMING_SERVICES = [
@@ -13,7 +13,8 @@ const STREAMING_SERVICES = [
     { id: 337, name: 'Disney+' }, { id: 1899, name: 'Max' }, { id: 350, name: 'Apple TV+' },
 ];
 
-const RandomPicker = () => {
+// ALTERAÇÃO: Recebendo onSpin como prop para comunicar com a HomePage
+const RandomPicker = ({ onSpin }) => {
     const [genres, setGenres] = useState([]);
     const [selectedService, setSelectedService] = useState('');
     const [selectedGenre, setSelectedGenre] = useState('');
@@ -22,10 +23,11 @@ const RandomPicker = () => {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
     
-    const { currentUser } = useAuth(); // Obter usuário logado
+    const { currentUser } = useAuth(); 
+    
     // Estados de Modal
     const [showResultModal, setShowResultModal] = useState(false);
-    const [showErrorModal, setShowErrorModal] = useState(false); // Novo estado para erro
+    const [showErrorModal, setShowErrorModal] = useState(false);
 
     const navigate = useNavigate();
 
@@ -40,40 +42,31 @@ const RandomPicker = () => {
     }, [mediaType]);
 
     const fetchRandomItem = async () => {
-        // Se ambos os filtros estiverem em branco, sorteia tipo e plataforma aleatoriamente
         let type = mediaType;
         let service = selectedService;
         let genre = selectedGenre;
 
         if (!selectedService && !selectedGenre) {
-            // Sorteia entre 'movie' e 'tv'
             type = Math.random() < 0.5 ? 'movie' : 'tv';
-            // Sorteia uma plataforma ou deixa em branco (todas)
             const allServices = ['', ...STREAMING_SERVICES.map(s => s.id)];
             service = allServices[Math.floor(Math.random() * allServices.length)];
-            // Gênero fica em branco (todos)
             genre = '';
         }
 
-        // 1. Busca inicial para saber total de páginas
         const initialData = await tmdbApi.discoverContent(type, service || null, 1, genre || null);
 
         if (!initialData.results || initialData.results.length === 0) {
-            return null; // Realmente não tem nada
+            return null; 
         }
 
         const totalPages = initialData.total_pages;
         const maxPage = Math.min(totalPages, 100);
-
-        // 2. Sorteia página
         const randomPage = Math.floor(Math.random() * maxPage) + 1;
 
-        // 3. Busca conteúdo da página sorteada
         const finalData = await tmdbApi.discoverContent(type, service || null, randomPage, genre || null);
         let items = finalData.results.filter(item => item.poster_path);
 
-        // --- LÓGICA DE RESGATE (FALLBACK) ---
-        // Se a página aleatória veio vazia (pode acontecer na API), buscamos a página 1 que sabemos que tem conteúdo
+        // Fallback para página 1 se a aleatória estiver vazia
         if (items.length === 0 && totalPages > 0) {
             console.log("Página aleatória vazia. Tentando resgate na página 1...");
             const rescueData = await tmdbApi.discoverContent(type, service || null, 1, genre || null);
@@ -81,7 +74,6 @@ const RandomPicker = () => {
         }
 
         if (items.length > 0) {
-            // Se o tipo sorteado for diferente do mediaType atual, atualiza para mostrar corretamente o card
             if (!selectedService && !selectedGenre && type !== mediaType) {
                 setMediaType(type);
             }
@@ -101,12 +93,17 @@ const RandomPicker = () => {
             if (randomItem) {
                 setResult(randomItem);
                 setShowResultModal(true);
-                // Dar XP ao usuário por usar a funcionalidade
+                
+                // 1. Chama a função do Pai (HomePage) para registrar no Backend
+                if (onSpin) {
+                    onSpin();
+                }
+
+                // 2. Mantém sua lógica local de XP (caso use para UI imediata)
                 if (currentUser) {
                     awardXP(currentUser.uid, 'USE_RANDOM_PICKER');
                 }
             } else {
-                // Em vez de alert(), usamos o modal
                 setShowErrorModal(true);
             }
 
@@ -118,7 +115,6 @@ const RandomPicker = () => {
         }
     };
 
-    // Handler único para navegação, igual ao ContentCard
     const handleNavigateToDetails = (item, event) => {
         if (event) event.stopPropagation();
         const type = item.media_type || mediaType;
@@ -205,7 +201,6 @@ const RandomPicker = () => {
                             <ContentCard
                                 content={result}
                                 mediaType={mediaType}
-                                // Passe o handler para o ContentCard, se ele aceitar onClick
                                 onClick={(e) => handleNavigateToDetails(result, e)}
                             />
                         </div>
@@ -225,14 +220,14 @@ const RandomPicker = () => {
                 </div>
             )}
 
-            {/* Modal de Erro (Profissional) */}
+            {/* Modal de Erro */}
             <ConfirmModal 
                 isOpen={showErrorModal}
                 onClose={() => setShowErrorModal(false)}
                 title="Nada Encontrado"
                 message="Não encontramos nenhum conteúdo com esses filtros exatos. Tente mudar a plataforma ou o gênero!"
                 confirmText="Entendi"
-                showCancel={false} // Esconde o botão cancelar para parecer um Alert
+                showCancel={false} 
             />
         </div>
     );

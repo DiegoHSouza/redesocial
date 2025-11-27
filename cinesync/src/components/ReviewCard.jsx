@@ -62,7 +62,7 @@ const ReviewCard = ({ review: initialReview, activeTab }) => { // 1. Receber act
                 const docRef = db.collection("users").doc(review.uidAutor);
                 const docSnap = await docRef.get();
                 if (docSnap.exists) {
-                    setAuthorData(docSnap.data());
+                    setAuthorData({ uid: docSnap.id, ...docSnap.data() });
                 }
             }
         };
@@ -92,12 +92,12 @@ const ReviewCard = ({ review: initialReview, activeTab }) => { // 1. Receber act
         e.stopPropagation(); // Impede que o clique no botão acione o clique no card
         if (!currentUser || !authorData) return;
 
-        // Atualização otimista da UI
-        setIsFollowing(!isFollowing);
-
         const userRef = db.collection("users").doc(currentUser.uid);
         const targetRef = db.collection("users").doc(authorData.uid);
         
+        const originalFollowingState = isFollowing;
+        setIsFollowing(!originalFollowingState); // Atualização otimista da UI
+
         const batch = db.batch();
         
         if (isFollowing) { // Se ESTAVA seguindo, agora vai DEIXAR de seguir
@@ -116,7 +116,7 @@ const ReviewCard = ({ review: initialReview, activeTab }) => { // 1. Receber act
             await batch.commit();
         } catch (error) {
             console.error("Erro ao seguir/deixar de seguir:", error);
-            setIsFollowing(!isFollowing); // Reverte a UI em caso de erro
+            setIsFollowing(originalFollowingState); // Reverte a UI em caso de erro
         }
     };
 

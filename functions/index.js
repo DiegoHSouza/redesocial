@@ -13,39 +13,44 @@ setGlobalOptions({
 });
 
 const XP_POINTS = {
-    REVIEW: 20,
-    COMMENT: 5,
-    LIKE_RECEIVED: 2,
+    REVIEW: 30,
+    COMMENT: 10,
+    LIKE_RECEIVED: 4,
     FOLLOW_RECEIVED: 5,
     CREATE_LIST: 10,
-    USE_RANDOM_PICKER: 1,
+    USE_RANDOM_PICKER: 5,
     CREATE_CLUB_POST: 15,
 };
 
-// --- NOVAS MEDALHAS (SISTEMA DE TIERS) ---
+// --- CONFIGURAÇÃO DE MEDALHAS (COM TIERS) ---
 const BADGES = {
     // Crítico (Reviews)
-    CRITIC_BRONZE: "critic_bronze", // 1 Review
-    CRITIC_SILVER: "critic_silver", // 10 Reviews
-    CRITIC_GOLD:   "critic_gold",   // 50 Reviews
-
-    // Maratonista (Listas)
-    MARATHON_BRONZE: "marathon_bronze", // 1 Lista
-    MARATHON_SILVER: "marathon_silver", // 5 Listas
-    MARATHON_GOLD:   "marathon_gold",   // 10 Listas
+    CRITIC_BRONZE: "critic_bronze",
+    CRITIC_SILVER: "critic_silver",
+    CRITIC_GOLD:   "critic_gold",
 
     // Popular (Likes)
-    POPULAR_BRONZE: "popular_bronze", // 1 Like
-    POPULAR_SILVER: "popular_silver", // 10 Likes
-    POPULAR_GOLD:   "popular_gold",   // 100 Likes
+    POPULAR_BRONZE: "popular_bronze",
+    POPULAR_SILVER: "popular_silver",
+    POPULAR_GOLD:   "popular_gold",
+
+    // Maratonista (Listas)
+    MARATHON_BRONZE: "marathon_bronze",
+    MARATHON_SILVER: "marathon_silver",
+    MARATHON_GOLD:   "marathon_gold",
 
     // Social (Seguidores)
-    SOCIAL_BRONZE: "social_bronze", // 5 Seguidores
-    SOCIAL_SILVER: "social_silver", // 20 Seguidores
-    SOCIAL_GOLD:   "social_gold",   // 50 Seguidores
+    SOCIAL_BRONZE: "social_bronze",
+    SOCIAL_SILVER: "social_silver",
+    SOCIAL_GOLD:   "social_gold",
 
-    // Comunidade
-    COMMUNITY_STARTER: "community_starter", // 1 Post
+    // Comunidade (Posts em Clubes)
+    COMMUNITY_BRONZE: "community_bronze",
+    COMMUNITY_SILVER: "community_silver",
+    COMMUNITY_GOLD:   "community_gold",
+    
+    // Legado
+    FIRST_REVIEW: "first_review" 
 };
 
 const STATS_MAP = {
@@ -55,6 +60,7 @@ const STATS_MAP = {
     FOLLOW_RECEIVED: "followers",
     LIKE_RECEIVED: "likes",
     CREATE_CLUB_POST: "club_posts",
+    USE_RANDOM_PICKER: "random_picks", // CORREÇÃO APLICADA: Mapeamento adicionado
 };
 
 // --- LÓGICA DE NÍVEIS ---
@@ -63,11 +69,44 @@ function calculateLevel(totalXP) {
     if (totalXP < 300) return 2;
     if (totalXP < 600) return 3;
     if (totalXP < 1000) return 4;
-    return Math.floor(totalXP / 500) + 3; 
+    return Math.floor((totalXP - 1000) / 500) + 5; // Pequena correção: variável era 'xp', mudei para 'totalXP' para bater com o argumento
 }
 
 /**
- * Função Core de Gamificação
+ * Função Auxiliar: EVOLUÇÃO DE MEDALHA
+ * Verifica se o usuário atingiu um novo tier, adiciona o novo e remove os inferiores.
+ */
+function updateBadgeTier(currentBadges, currentValue, tiers) {
+    let updatedBadges = [...currentBadges];
+    let hasChanged = false;
+
+    // Tiers devem vir ordenados do MAIOR para o MENOR (Gold -> Silver -> Bronze)
+    for (const tier of tiers) {
+        if (currentValue >= tier.limit) {
+            // 1. Se ele ainda não tem essa medalha superior, adiciona
+            if (!updatedBadges.includes(tier.id)) {
+                updatedBadges.push(tier.id);
+                hasChanged = true;
+            }
+
+            // 2. REMOVE todas as outras medalhas inferiores desta mesma família
+            tiers.forEach(t => {
+                if (t.id !== tier.id && updatedBadges.includes(t.id)) {
+                    updatedBadges = updatedBadges.filter(b => b !== t.id);
+                    hasChanged = true;
+                }
+            });
+
+            // Já achamos o nível mais alto que ele tem direito, paramos o loop.
+            break; 
+        }
+    }
+
+    return { newBadges: updatedBadges, changed: hasChanged };
+}
+
+/**
+ * Função Core de Gamificação (Transacional)
  */
 async function awardPointsAndCheckBadges(userId, actionType, context = {}) {
     const amount = XP_POINTS[actionType];
@@ -82,76 +121,75 @@ async function awardPointsAndCheckBadges(userId, actionType, context = {}) {
 
             const userData = userDoc.data();
             const currentStats = userData.stats || {};
-            const currentBadges = userData.badges || [];
-            let newBadges = [...currentBadges];
+            let currentBadges = userData.badges || [];
             let badgeAwarded = false;
 
             // 1. Incrementa XP e Estatística Local
             const newXP = (userData.xp || 0) + amount;
-            
             const statField = STATS_MAP[actionType];
-            const currentStatValue = (currentStats[statField] || 0) + 1;
-
-            // --- FUNÇÃO AUXILIAR DE TIERS ---
-            const checkTiers = (value, tiers) => {
-                tiers.forEach(tier => {
-                    if (value >= tier.limit && !newBadges.includes(tier.id)) {
-                        newBadges.push(tier.id);
-                        badgeAwarded = true;
-                    }
-                });
-            };
-
-            // 2. Verifica Badges por Categoria
             
-            // CRÍTICO (Reviews)
+            // Segurança: Se não houver mapeamento, não quebra, só não salva stat
+            let currentStatValue = 0;
+            if (statField) {
+                currentStatValue = (currentStats[statField] || 0) + 1;
+            }
+
+            // 2. Verifica Badges (Com Lógica de Evolução)
+            let result;
+
+            // --- CRÍTICO (Reviews) ---
             if (actionType === "REVIEW") {
-                checkTiers(currentStatValue, [
-                    { limit: 1,  id: BADGES.CRITIC_BRONZE },
+                result = updateBadgeTier(currentBadges, currentStatValue, [
+                    { limit: 50, id: BADGES.CRITIC_GOLD },
                     { limit: 10, id: BADGES.CRITIC_SILVER },
-                    { limit: 50, id: BADGES.CRITIC_GOLD }
+                    { limit: 1,  id: BADGES.CRITIC_BRONZE }
                 ]);
+                if (result.changed) { currentBadges = result.newBadges; badgeAwarded = true; }
             }
 
-            // MARATONISTA (Listas)
+            // --- MARATONISTA (Listas) ---
             if (actionType === "CREATE_LIST") {
-                checkTiers(currentStatValue, [
-                    { limit: 1,  id: BADGES.MARATHON_BRONZE },
+                result = updateBadgeTier(currentBadges, currentStatValue, [
+                    { limit: 10, id: BADGES.MARATHON_GOLD },
                     { limit: 5,  id: BADGES.MARATHON_SILVER },
-                    { limit: 10, id: BADGES.MARATHON_GOLD }
+                    { limit: 1,  id: BADGES.MARATHON_BRONZE }
                 ]);
+                if (result.changed) { currentBadges = result.newBadges; badgeAwarded = true; }
             }
 
-            // POPULAR (Likes)
+            // --- POPULAR (Likes) ---
             if (actionType === "LIKE_RECEIVED") {
-                checkTiers(currentStatValue, [
-                    { limit: 1,   id: BADGES.POPULAR_BRONZE },
+                result = updateBadgeTier(currentBadges, currentStatValue, [
+                    { limit: 100, id: BADGES.POPULAR_GOLD },
                     { limit: 10,  id: BADGES.POPULAR_SILVER },
-                    { limit: 100, id: BADGES.POPULAR_GOLD }
+                    { limit: 1,   id: BADGES.POPULAR_BRONZE }
                 ]);
+                if (result.changed) { currentBadges = result.newBadges; badgeAwarded = true; }
             }
 
-            // SOCIAL (Seguidores)
-            // Nota: A lógica de followers no trigger soma 1, então usamos currentStatValue
+            // --- SOCIAL (Seguidores) ---
             if (actionType === "FOLLOW_RECEIVED") {
-                checkTiers(currentStatValue, [
-                    { limit: 5,  id: BADGES.SOCIAL_BRONZE },
+                result = updateBadgeTier(currentBadges, currentStatValue, [
+                    { limit: 50, id: BADGES.SOCIAL_GOLD },
                     { limit: 20, id: BADGES.SOCIAL_SILVER },
-                    { limit: 50, id: BADGES.SOCIAL_GOLD }
+                    { limit: 5,  id: BADGES.SOCIAL_BRONZE }
                 ]);
+                if (result.changed) { currentBadges = result.newBadges; badgeAwarded = true; }
             }
 
-            // COMMUNITY STARTER (Post único)
-            if (actionType === "CREATE_CLUB_POST" && !newBadges.includes(BADGES.COMMUNITY_STARTER)) {
-                if (currentStatValue >= 1) {
-                    newBadges.push(BADGES.COMMUNITY_STARTER);
-                    badgeAwarded = true;
-                }
+            // --- COMUNIDADE (Posts) ---
+            if (actionType === "CREATE_CLUB_POST") {
+                result = updateBadgeTier(currentBadges, currentStatValue, [
+                    { limit: 20, id: BADGES.COMMUNITY_GOLD },
+                    { limit: 5,  id: BADGES.COMMUNITY_SILVER },
+                    { limit: 1,  id: BADGES.COMMUNITY_BRONZE }
+                ]);
+                if (result.changed) { currentBadges = result.newBadges; badgeAwarded = true; }
             }
 
-            // Badges de Contexto (Genérico)
-            if (context.newBadge && !newBadges.includes(context.newBadge)) {
-                newBadges.push(context.newBadge);
+            // Badges de Contexto (Ex: Verificado, Admin)
+            if (context.newBadge && !currentBadges.includes(context.newBadge)) {
+                currentBadges.push(context.newBadge);
                 badgeAwarded = true;
             }
 
@@ -165,7 +203,7 @@ async function awardPointsAndCheckBadges(userId, actionType, context = {}) {
             };
 
             if (badgeAwarded) {
-                updateData.badges = newBadges;
+                updateData.badges = currentBadges;
             }
 
             if (statField) {
@@ -179,7 +217,7 @@ async function awardPointsAndCheckBadges(userId, actionType, context = {}) {
     }
 }
 
-// --- TRIGGERS (Mantidos iguais, pois a lógica está na função acima) ---
+// --- TRIGGERS ---
 
 exports.onReviewCreated = onDocumentCreated("reviews/{reviewId}", async (event) => {
     const reviewData = event.data.data();
@@ -204,6 +242,21 @@ exports.onClubPostCreated = onDocumentCreated("groups/{groupId}/posts/{postId}",
     const postData = event.data.data();
     if (!postData) return;
     return awardPointsAndCheckBadges(postData.authorId, "CREATE_CLUB_POST");
+});
+
+// CORREÇÃO APLICADA: Nova função para o Sorteador
+exports.registerRandomPickerUsage = onCall(async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Auth required.");
+    }
+    const userId = request.auth.uid;
+    try {
+        await awardPointsAndCheckBadges(userId, "USE_RANDOM_PICKER");
+        return { success: true };
+    } catch (error) {
+        console.error("Erro no sorteador:", error);
+        throw new HttpsError("internal", "Erro ao processar XP.");
+    }
 });
 
 exports.onUserUpdated = onDocumentUpdated("users/{userId}", async (event) => {
@@ -262,14 +315,12 @@ exports.onReviewUpdated = onDocumentUpdated("reviews/{reviewId}", async (event) 
     }
 });
 
-// 7. Recalcular XP (ATUALIZADO COM A NOVA LÓGICA DE TIERS)
+// 7. Recalcular XP (Otimizado, com Evolução de Medalhas e Sorteador)
 exports.recalculateUserXP = onCall(async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
     const userId = request.auth.uid;
 
     try {
-        console.log("--- INICIANDO RECÁLCULO V2 (TIERS) ---");
-
         // 1. REVIEWS
         const reviewsSnapshot = await db.collection("reviews")
             .where("uidAutor", "==", userId).select("uidAutor").get();
@@ -280,7 +331,7 @@ exports.recalculateUserXP = onCall(async (request) => {
             .where("uidAutor", "==", userId).select("uidAutor").get();
         const listsCount = listsSnapshot.size;
 
-        // 3. POSTS (Requer o índice de Isenção que você criou)
+        // 3. POSTS (Collection Group - Requer Índice que você já criou)
         const clubPostsSnapshot = await db.collectionGroup("posts")
            .where("authorId", "==", userId).select("authorId").get();
         const clubPostsCount = clubPostsSnapshot.size;
@@ -300,46 +351,65 @@ exports.recalculateUserXP = onCall(async (request) => {
         const userData = userDoc.data();
         const followersCount = userData.seguidores?.length || 0;
 
-        // 6. COMENTÁRIOS
+        // 6. COMENTÁRIOS (Pendente de implementação de contador, mantido 0)
         const commentsCount = 0;
 
-        // CÁLCULO
+        // CORREÇÃO APLICADA: 7. SORTEADOR (Lê do stat salvo)
+        const randomPicksCount = userData.stats?.random_picks || 0;
+
+        // CÁLCULO XP
         const totalXP =
             (reviewCount * XP_POINTS.REVIEW) +
             (listsCount * XP_POINTS.CREATE_LIST) +
             (followersCount * XP_POINTS.FOLLOW_RECEIVED) +
             (likesCount * XP_POINTS.LIKE_RECEIVED) +
             (clubPostsCount * XP_POINTS.CREATE_CLUB_POST) +
+            (randomPicksCount * XP_POINTS.USE_RANDOM_PICKER) + // Incluído
             (commentsCount * XP_POINTS.COMMENT);
 
-        // --- REGRAS DE BADGES (REFEITAS PARA TIERS) ---
-        let newBadges = [];
+        // --- CÁLCULO DE BADGES (EVOLUÇÃO) ---
+        let newBadges = []; // Começamos do zero para recalcular tudo certo
 
-        // Função auxiliar local
-        const addBadge = (id) => { if (!newBadges.includes(id)) newBadges.push(id); };
+        // Helper para aplicar a evolução
+        const applyTier = (badges, value, tiers) => {
+            const result = updateBadgeTier(badges, value, tiers);
+            return result.newBadges;
+        };
 
         // Crítico
-        if (reviewCount >= 1) addBadge(BADGES.CRITIC_BRONZE);
-        if (reviewCount >= 10) addBadge(BADGES.CRITIC_SILVER);
-        if (reviewCount >= 50) addBadge(BADGES.CRITIC_GOLD);
-
-        // Maratonista
-        if (listsCount >= 1) addBadge(BADGES.MARATHON_BRONZE);
-        if (listsCount >= 5) addBadge(BADGES.MARATHON_SILVER);
-        if (listsCount >= 10) addBadge(BADGES.MARATHON_GOLD);
+        newBadges = applyTier(newBadges, reviewCount, [
+            { limit: 50, id: BADGES.CRITIC_GOLD },
+            { limit: 10, id: BADGES.CRITIC_SILVER },
+            { limit: 1,  id: BADGES.CRITIC_BRONZE }
+        ]);
 
         // Popular
-        if (likesCount >= 1) addBadge(BADGES.POPULAR_BRONZE);
-        if (likesCount >= 10) addBadge(BADGES.POPULAR_SILVER);
-        if (likesCount >= 100) addBadge(BADGES.POPULAR_GOLD);
+        newBadges = applyTier(newBadges, likesCount, [
+            { limit: 100, id: BADGES.POPULAR_GOLD },
+            { limit: 10,  id: BADGES.POPULAR_SILVER },
+            { limit: 1,   id: BADGES.POPULAR_BRONZE }
+        ]);
+
+        // Maratonista
+        newBadges = applyTier(newBadges, listsCount, [
+            { limit: 10, id: BADGES.MARATHON_GOLD },
+            { limit: 5,  id: BADGES.MARATHON_SILVER },
+            { limit: 1,  id: BADGES.MARATHON_BRONZE }
+        ]);
 
         // Social
-        if (followersCount >= 5) addBadge(BADGES.SOCIAL_BRONZE);
-        if (followersCount >= 20) addBadge(BADGES.SOCIAL_SILVER);
-        if (followersCount >= 50) addBadge(BADGES.SOCIAL_GOLD);
+        newBadges = applyTier(newBadges, followersCount, [
+            { limit: 50, id: BADGES.SOCIAL_GOLD },
+            { limit: 20, id: BADGES.SOCIAL_SILVER },
+            { limit: 5,  id: BADGES.SOCIAL_BRONZE }
+        ]);
 
-        // Pioneiro
-        if (clubPostsCount >= 1) addBadge(BADGES.COMMUNITY_STARTER);
+        // Comunidade
+        newBadges = applyTier(newBadges, clubPostsCount, [
+            { limit: 20, id: BADGES.COMMUNITY_GOLD },
+            { limit: 5,  id: BADGES.COMMUNITY_SILVER },
+            { limit: 1,  id: BADGES.COMMUNITY_BRONZE }
+        ]);
 
         const newLevel = calculateLevel(totalXP);
 
@@ -347,12 +417,13 @@ exports.recalculateUserXP = onCall(async (request) => {
         await db.collection("users").doc(userId).update({
             xp: totalXP,
             level: newLevel,
-            badges: newBadges,
+            badges: newBadges, 
             "stats.reviews": reviewCount,
             "stats.lists": listsCount,
             "stats.followers": followersCount,
             "stats.likes": likesCount,
             "stats.club_posts": clubPostsCount
+            // Não sobrescrevemos random_picks aqui pois ele não é recontado do banco, apenas lido
         });
 
         return { success: true, totalXP, newLevel };
