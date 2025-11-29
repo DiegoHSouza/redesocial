@@ -21,14 +21,15 @@ import CreateListPage from './pages/CreateListPage';
 import ChatListPage from './pages/ChatListPage';
 import ChatPage from './pages/ChatPage';
 
-// Funcionalidades Premium (Novas)
+// Funcionalidades Premium / Novas
 import CineMatchPage from './pages/CineMatchPage';
+import CineBattlePage from './pages/CineBattlePage'; // ✅ ADICIONADO: Batalha de Filmes
 import CineClubsPage from './pages/CineClubsPage';
 import ClubDetailPage from './pages/ClubDetailPage';
-import ClubPostPage from './pages/ClubPostPage'; // <--- 1. IMPORTADO
+import ClubPostPage from './pages/ClubPostPage';
 import AchievementsPage from './pages/AchievementsPage';
-import AboutPage from './pages/AboutPage'; // Importa a página Sobre
-import PrivacyPolicyPage from './pages/PrivacyPolicyPage'; // Importa a nova página
+import AboutPage from './pages/AboutPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 
 // --- COMPONENTES GLOBAIS ---
 import Header from './components/Header';
@@ -49,7 +50,7 @@ function AnimatedRoutes() {
     const { currentUser } = useAuth();
 
     return (
-        // Layout base com ajuste para o Header fixo (pt-24) e BottomNav (pb-24 no mobile)
+        // Layout base com ajuste para o Header fixo (pt-24)
         <div className={`bg-gray-900 min-h-screen text-white font-sans flex flex-col ${currentUser ? 'pt-24' : ''}`}>
             
             {currentUser && <Header />} 
@@ -63,12 +64,10 @@ function AnimatedRoutes() {
                         <PageTransition><LoginPage /></PageTransition>
                     } />
 
-                    {/* Rota Pública para a Política de Privacidade */}
+                    {/* Rotas Públicas */}
                     <Route path="/privacy-policy" element={
                         <PageTransition><PrivacyPolicyPage /></PageTransition>
                     } />
-
-                    {/* Rota Pública para a página Sobre */}
                     <Route path="/about" element={
                         <PageTransition><AboutPage /></PageTransition>
                     } />
@@ -100,11 +99,12 @@ function AnimatedRoutes() {
                     
                     {/* Funcionalidades Avançadas */}
                     <Route path="/match" element={<PrivateRoute><PageTransition><CineMatchPage /></PageTransition></PrivateRoute>} />
+                    <Route path="/battle" element={<PrivateRoute><PageTransition><CineBattlePage /></PageTransition></PrivateRoute>} /> {/* ✅ ADICIONADO: Rota da Batalha */}
                     
                     {/* CLUBES */}
                     <Route path="/clubs" element={<PrivateRoute><PageTransition><CineClubsPage /></PageTransition></PrivateRoute>} />
                     <Route path="/club/:groupId" element={<PrivateRoute><PageTransition><ClubDetailPage /></PageTransition></PrivateRoute>} />
-                    <Route path="/club/:groupId/post/:postId" element={<PrivateRoute><PageTransition><ClubPostPage /></PageTransition></PrivateRoute>} /> {/* <--- 2. ROTA ADICIONADA */}
+                    <Route path="/club/:groupId/post/:postId" element={<PrivateRoute><PageTransition><ClubPostPage /></PageTransition></PrivateRoute>} />
                     
                 </Routes>
             </AnimatePresence>

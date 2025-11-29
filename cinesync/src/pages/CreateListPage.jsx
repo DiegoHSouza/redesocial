@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../services/firebaseConfig';
 import { useAuth } from '../contexts/AuthContext';
 import firebase from 'firebase/compat/app';
-import { Spinner, ErrorMessage } from '../components/Common';
-import { awardXP } from '../utils/gamification';
+import { Spinner } from '../components/Common';
 import { ArrowLeftIcon } from '../components/Icons';
+// REMOVIDO: import { awardXP } from '../utils/gamification';
 
 const CreateListPage = () => {
     const [title, setTitle] = useState('');
@@ -38,18 +38,15 @@ const CreateListPage = () => {
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             };
 
-            // --- LÓGICA PARA MEDALHA EM TEMPO REAL ---
-            // 1. Busca a contagem atual de listas do usuário
-            const listsQuery = await db.collection('lists').where('uidAutor', '==', currentUser.uid).get();
-            const currentListCount = listsQuery.size;
-
+            // Salva a lista no Firestore
             const docRef = await db.collection('lists').add(newList);
             
-            // Dar XP pela criação da lista
-            // 2. Passa a contagem para a função de XP
-            awardXP(currentUser.uid, 'CREATE_LIST', { listCount: currentListCount });
+            // NOTA: A lógica de XP foi removida daqui.
+            // O Backend (Cloud Functions) detecta o evento 'onListCreated' 
+            // e atribui os pontos e verifica a medalha 'Maratonista' automaticamente.
 
-            navigate(`/list/${docRef.id}?editing=true`); // Redireciona para a página da nova lista em modo de edição
+            // Redireciona para a página da nova lista em modo de edição
+            navigate(`/list/${docRef.id}?editing=true`); 
         } catch (err) {
             console.error("Erro ao criar lista:", err);
             setError('Ocorreu um erro ao criar a lista. Tente novamente.');

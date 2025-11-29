@@ -1,16 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { db } from '../services/firebaseConfig';
-import { doc, onSnapshot, collection, query, orderBy, addDoc, serverTimestamp, updateDoc, increment, deleteDoc, arrayRemove, arrayUnion, getDoc } from 'firebase/firestore';
+import { 
+    doc, onSnapshot, collection, query, orderBy, 
+    addDoc, serverTimestamp, updateDoc, increment, 
+    deleteDoc, arrayRemove, arrayUnion, getDoc 
+} from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import { Spinner, getAvatarUrl } from '../components/Common';
-import { HeartIcon, TrashIcon, MessageSquareIcon, SendIcon } from '../components/Icons';
+import { 
+    HeartIcon, TrashIcon, MessageSquareIcon, 
+    ArrowLeftIcon, ShareIcon, CalendarIcon, SendIcon 
+} from '../components/Icons'; // Certifique-se de que os ícones existem
 
 const ClubPostPage = () => {
     const { groupId, postId } = useParams();
     const navigate = useNavigate();
     const { currentUser } = useAuth();
     
+    // -- State --
     const [groupData, setGroupData] = useState(null);
     const [post, setPost] = useState(null);
     const [comments, setComments] = useState([]);
@@ -18,7 +26,7 @@ const ClubPostPage = () => {
     const [newComment, setNewComment] = useState("");
     const [isPosting, setIsPosting] = useState(false);
 
-    // Carrega Post e Autor
+    // 1. Load Post, Group & Author
     useEffect(() => {
         const groupRef = doc(db, 'groups', groupId);
         const unsubGroup = onSnapshot(groupRef, (doc) => {
@@ -26,40 +34,44 @@ const ClubPostPage = () => {
         });
 
         const postRef = doc(db, 'groups', groupId, 'posts', postId);
-        const unsubPost = onSnapshot(postRef, async (postDoc) => {
+        const unsubPost = onSnapshot(postRef, (postDoc) => {
             if (!postDoc.exists()) {
-                navigate(`/club/${groupId}`); // Se apagarem o post, volta pro clube
+                navigate(`/club/${groupId}`);
                 return;
             }
             const postData = { id: postDoc.id, ...postDoc.data() };
             
-            // Busca autor do post
+            // Fetch Post Author
             if (postData.authorId) {
                 const userRef = doc(db, 'users', postData.authorId);
-                onSnapshot(userRef, (userDoc) => {
-                    if (userDoc.exists()) {
-                        postData.author = userDoc.data();
-                        setPost(postData); // Atualiza o estado com o autor
+                getDoc(userRef).then(userSnap => {
+                    if (userSnap.exists()) {
+                        setPost({ ...postData, author: userSnap.data() });
+                    } else {
+                        setPost(postData);
                     }
+                    setLoading(false);
                 });
+            } else {
+                setPost(postData);
+                setLoading(false);
             }
-            setPost(postData);
-            setLoading(false);
         });
+
         return () => { unsubGroup(); unsubPost(); };
     }, [groupId, postId, navigate]);
 
-    // Carrega Comentários em Tempo Real
+    // 2. Load Comments Real-time
     useEffect(() => {
         const commentsQuery = query(collection(db, 'groups', groupId, 'posts', postId, 'comments'), orderBy('timestamp', 'asc'));
         const unsubscribe = onSnapshot(commentsQuery, async (snapshot) => {
             const commentsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
-            // Popula autores dos comentários
+            // Batch fetch comment authors
             const authorIds = [...new Set(commentsData.map(c => c.authorId))];
             const authors = {};
             if (authorIds.length > 0) {
-                const authorSnapshots = await Promise.all(authorIds.map(uid => getDoc(doc(db, 'users', uid)))); // Busca todos os documentos de autor de uma vez
+                const authorSnapshots = await Promise.all(authorIds.map(uid => getDoc(doc(db, 'users', uid))));
                 authorSnapshots.forEach(userDoc => {
                     if (userDoc.exists()) authors[userDoc.id] = userDoc.data();
                 });
@@ -70,40 +82,49 @@ const ClubPostPage = () => {
         return () => unsubscribe();
     }, [groupId, postId]);
 
+    // -- Actions --
     const handlePostComment = async (e) => {
         e.preventDefault();
         if (!newComment.trim()) return;
         setIsPosting(true);
-        
-        const commentsColRef = collection(db, 'groups', groupId, 'posts', postId, 'comments');
-        await addDoc(commentsColRef, {
-            text: newComment,
-            authorId: currentUser.uid,
-            timestamp: serverTimestamp()
-        });
+        try {
+            const commentsColRef = collection(db, 'groups', groupId, 'posts', postId, 'comments');
+            await addDoc(commentsColRef, {
+                text: newComment,
+                authorId: currentUser.uid,
+                timestamp: serverTimestamp()
+            });
 
-        const postRef = doc(db, 'groups', groupId, 'posts', postId);
-        await updateDoc(postRef, { commentCount: increment(1) });
-
-        setNewComment("");
+            const postRef = doc(db, 'groups', groupId, 'posts', postId);
+            await updateDoc(postRef, { commentCount: increment(1) });
+            setNewComment("");
+        } catch (error) {
+            console.error("Erro ao comentar:", error);
+        }
         setIsPosting(false);
     };
 
     const handleDeleteComment = async (commentId) => {
-        if(!window.confirm("Apagar comentário?")) return;
-        
-        const commentRef = doc(db, 'groups', groupId, 'posts', postId, 'comments', commentId);
-        await deleteDoc(commentRef);
-
-        const postRef = doc(db, 'groups', groupId, 'posts', postId);
-        await updateDoc(postRef, { commentCount: increment(-1) });
+        if(!window.confirm("Apagar comentário permanentemente?")) return;
+        try {
+            const commentRef = doc(db, 'groups', groupId, 'posts', postId, 'comments', commentId);
+            await deleteDoc(commentRef);
+            const postRef = doc(db, 'groups', groupId, 'posts', postId);
+            await updateDoc(postRef, { commentCount: increment(-1) });
+        } catch (error) {
+            console.error(error);
+        }
     };
 
     const handleLikePost = async () => {
         const isLiked = post.likes?.includes(currentUser.uid);
         const postRef = doc(db, 'groups', groupId, 'posts', postId);
-        if (isLiked) await updateDoc(postRef, { likes: arrayRemove(currentUser.uid) });
-        else await updateDoc(postRef, { likes: arrayUnion(currentUser.uid) });
+        try {
+            if (isLiked) await updateDoc(postRef, { likes: arrayRemove(currentUser.uid) });
+            else await updateDoc(postRef, { likes: arrayUnion(currentUser.uid) });
+        } catch (error) {
+            console.error(error);
+        }
     };
 
     if (loading) return <Spinner />;
@@ -112,126 +133,223 @@ const ClubPostPage = () => {
     const isLiked = post.likes?.includes(currentUser?.uid);
 
     return (
-        <div className="container mx-auto p-4 md:p-8 text-white">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="min-h-screen bg-gray-950 text-gray-100 font-sans pb-20">
+            
+            {/* --- IMMERSIVE MINI-HEADER --- */}
+            <div className="relative h-[200px] w-full overflow-hidden group">
+                <div 
+                    className="absolute inset-0 bg-cover bg-center blur-lg opacity-40 scale-105"
+                    style={{ backgroundImage: `url(${groupData.photo})` }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/50 to-transparent" />
                 
-                {/* --- COLUNA PRINCIPAL (POST E COMENTÁRIOS) --- */}
-                <div className="lg:col-span-2">
-                    {/* Botão de Voltar */}
-                    <button onClick={() => navigate(`/club/${groupId}`)} className="mb-4 text-gray-400 hover:text-white font-bold flex items-center gap-2 transition-colors text-sm">
-                        <span className="text-xl leading-none">←</span> Voltar para o Clube
+                <div className="absolute top-6 left-4 lg:left-8 z-20 flex items-center justify-between w-[95%] mx-auto">
+                    <button onClick={() => navigate(`/club/${groupId}`)} className="flex items-center gap-2 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full text-white hover:bg-white/20 transition-all text-sm font-medium border border-white/10">
+                        <ArrowLeftIcon className="w-4 h-4" /> Voltar para {groupData.name}
                     </button>
+                </div>
+            </div>
 
-                    {/* POST PRINCIPAL */}
-                    <div className="bg-gray-800/70 border border-gray-700 rounded-xl shadow-xl mb-8">
-                        <div className="p-5">
-                            <div className="flex items-center gap-3 mb-4 cursor-pointer" onClick={() => navigate(`/profile/${post.authorId}`)}>
-                                <img 
-                                    src={getAvatarUrl(post.author?.foto, post.author?.nome)} 
-                                    className="w-10 h-10 rounded-full object-cover"
-                                    alt=""
-                                />
+            {/* --- MAIN CONTENT --- */}
+            <div className="container mx-auto px-4 lg:px-8 max-w-6xl -mt-24 relative z-10">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    
+                    {/* LEFT COL: CONTENT (8 cols) */}
+                    <div className="lg:col-span-8">
+                        
+                        {/* 1. THE MAIN POST CARD */}
+                        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 md:p-8 shadow-2xl mb-6">
+                            
+                            {/* Author Info */}
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="cursor-pointer" onClick={() => navigate(`/profile/${post.authorId}`)}>
+                                    <img 
+                                        src={getAvatarUrl(post.author?.foto, post.author?.nome)} 
+                                        className="w-12 h-12 rounded-full object-cover border-2 border-gray-800"
+                                        alt={post.author?.nome}
+                                    />
+                                </div>
                                 <div>
-                                    <h1 className="font-bold text-base text-white hover:underline">{post.author?.nome}</h1>
-                                    <p className="text-xs text-gray-500">{post.timestamp?.seconds ? new Date(post.timestamp.seconds * 1000).toLocaleString() : 'agora'}</p>
+                                    <h1 
+                                        className="font-bold text-lg text-white hover:text-indigo-400 cursor-pointer transition-colors"
+                                        onClick={() => navigate(`/profile/${post.authorId}`)}
+                                    >
+                                        {post.author?.nome || "Usuário Desconhecido"}
+                                    </h1>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                                        <span>Postado em {post.timestamp?.seconds ? new Date(post.timestamp.seconds * 1000).toLocaleString() : 'Recentemente'}</span>
+                                        {post.authorId === groupData.adminId && (
+                                            <span className="bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded text-[10px] font-bold">ADMIN</span>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                            
-                            <p className="text-lg text-gray-200 whitespace-pre-wrap leading-relaxed mb-5">{post.text}</p>
 
-                            <div className="flex items-center gap-4 border-t border-gray-700/50 pt-4">
-                                <button onClick={handleLikePost} className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full transition-colors ${isLiked ? 'text-pink-400 bg-pink-500/10' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`}>
-                                    <HeartIcon className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
-                                    {post.likes?.length || 0}
-                                </button>
-                                <div className="flex items-center gap-1.5 text-xs text-gray-400 font-bold px-3 py-1.5">
-                                    <MessageSquareIcon className="w-4 h-4" />
-                                    {comments.length}
+                            {/* Post Content */}
+                            <div className="mb-8">
+                                <p className="text-gray-200 text-lg leading-relaxed whitespace-pre-wrap">
+                                    {post.text}
+                                </p>
+                            </div>
+
+                            {/* Actions Bar */}
+                            <div className="flex items-center justify-between pt-6 border-t border-gray-800">
+                                <div className="flex gap-4">
+                                    <button 
+                                        onClick={handleLikePost} 
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${
+                                            isLiked 
+                                            ? 'bg-pink-500/10 text-pink-500 ring-1 ring-pink-500/50' 
+                                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+                                        }`}
+                                    >
+                                        <HeartIcon className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
+                                        <span>{post.likes?.length || 0}</span>
+                                    </button>
+                                    
+                                    <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-gray-800 text-gray-400 font-bold cursor-default">
+                                        <MessageSquareIcon className="w-5 h-5" />
+                                        <span>{comments.length}</span>
+                                    </div>
                                 </div>
+                                
+                                <button className="p-2 text-gray-500 hover:text-white transition-colors">
+                                    <ShareIcon className="w-5 h-5" />
+                                </button>
                             </div>
                         </div>
-                    </div>
 
-                    {/* SESSÃO DE COMENTÁRIOS */}
-                    <div className="bg-gray-800/70 rounded-xl p-4 md:p-6 border border-gray-700">
-                        {/* Input de Comentário */}
-                        <form onSubmit={handlePostComment} className="flex gap-3 mb-8 items-start">
-                            <img src={getAvatarUrl(null, 'Eu')} className="w-9 h-9 rounded-full mt-1" alt=""/>
-                            <div className="flex-1">
-                                <textarea 
-                                    value={newComment}
-                                    onChange={e => setNewComment(e.target.value)}
-                                    placeholder="Deixe seu comentário..."
-                                    className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors min-h-[48px] resize-y"
-                                    rows="1"
-                                />
-                                <div className="flex justify-end mt-2">
-                                    <button 
-                                        type="submit" 
-                                        disabled={!newComment.trim() || isPosting}
-                                        className="bg-indigo-600 px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-                                    >
-                                        Comentar
-                                    </button>
-                                </div>
-                            </div>
-                        </form>
+                        {/* 2. COMMENTS SECTION */}
+                        <div className="bg-gray-900/50 border border-gray-800/50 rounded-2xl p-6 md:p-8">
+                            <h3 className="text-lg font-bold text-gray-300 mb-6 flex items-center gap-2">
+                                Discussão <span className="text-gray-600 text-sm font-normal">({comments.length})</span>
+                            </h3>
 
-                        {/* Lista de Comentários */}
-                        <div className="space-y-5">
-                            {comments.map(comment => (
-                                <div key={comment.id} className="flex gap-3 animate-fade-in relative pl-5">
-                                    {/* Linha da Thread */}
-                                    <div className="absolute left-4 top-10 bottom-0 w-0.5 bg-gray-700/50"></div>
-
-                                    <div className="flex-shrink-0 z-10" onClick={() => navigate(`/profile/${comment.authorId}`)}>
-                                        <img 
-                                            src={getAvatarUrl(comment.author?.foto, comment.author?.nome)} 
-                                            className="w-8 h-8 rounded-full object-cover cursor-pointer"
-                                            alt=""
-                                        />
+                            {/* Input Form */}
+                            <form onSubmit={handlePostComment} className="flex gap-4 mb-10 items-start">
+                                <img src={getAvatarUrl(null, 'Eu')} className="w-10 h-10 rounded-full border border-gray-700 hidden md:block" alt=""/>
+                                <div className="flex-1 relative group">
+                                    <textarea 
+                                        value={newComment}
+                                        onChange={e => setNewComment(e.target.value)}
+                                        placeholder="O que você acha disso?"
+                                        className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-4 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all min-h-[60px] resize-y shadow-inner"
+                                        rows="2"
+                                    />
+                                    <div className="absolute bottom-3 right-3">
+                                        <button 
+                                            type="submit" 
+                                            disabled={!newComment.trim() || isPosting}
+                                            className="bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition-all disabled:opacity-50 disabled:scale-95 shadow-lg"
+                                        >
+                                            <SendIcon className="w-4 h-4" />
+                                        </button>
                                     </div>
-                                    <div className="flex-1">
-                                        <div className="bg-gray-800 p-3 rounded-lg border border-gray-700/50">
-                                            <div className="flex justify-between items-center mb-1">
-                                                <span className="font-bold text-sm hover:underline cursor-pointer" onClick={() => navigate(`/profile/${comment.authorId}`)}>{comment.author?.nome}</span>
+                                </div>
+                            </form>
+
+                            {/* Comments List */}
+                            <div className="space-y-8">
+                                {comments.map((comment, index) => (
+                                    <div key={comment.id} className="flex gap-4 animate-fade-in relative group">
+                                        {/* Thread Line */}
+                                        {index !== comments.length - 1 && (
+                                            <div className="absolute left-5 top-12 bottom-[-32px] w-[2px] bg-gray-800 group-hover:bg-gray-700 transition-colors"></div>
+                                        )}
+
+                                        <div className="flex-shrink-0 z-10 cursor-pointer" onClick={() => navigate(`/profile/${comment.authorId}`)}>
+                                            <img 
+                                                src={getAvatarUrl(comment.author?.foto, comment.author?.nome)} 
+                                                className="w-10 h-10 rounded-full object-cover border border-gray-800"
+                                                alt=""
+                                            />
+                                        </div>
+                                        
+                                        <div className="flex-1">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span 
+                                                        className="font-bold text-sm text-gray-200 hover:underline cursor-pointer"
+                                                        onClick={() => navigate(`/profile/${comment.authorId}`)}
+                                                    >
+                                                        {comment.author?.nome || "Usuário"}
+                                                    </span>
+                                                    <span className="text-xs text-gray-600">•</span>
+                                                    <span className="text-xs text-gray-500">
+                                                        {comment.timestamp ? new Date(comment.timestamp.seconds * 1000).toLocaleDateString() : 'agora'}
+                                                    </span>
+                                                </div>
+                                                
                                                 {currentUser && currentUser.uid === comment.authorId && (
-                                                    <button onClick={() => handleDeleteComment(comment.id)} className="text-gray-500 hover:text-red-400" title="Apagar">
-                                                        <TrashIcon className="w-3 h-3" />
+                                                    <button 
+                                                        onClick={() => handleDeleteComment(comment.id)} 
+                                                        className="text-gray-600 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        title="Apagar"
+                                                    >
+                                                        <TrashIcon className="w-3.5 h-3.5" />
                                                     </button>
                                                 )}
                                             </div>
-                                            <p className="text-gray-300 text-sm whitespace-pre-wrap">{comment.text}</p>
-                                        </div>
-                                        <div className="ml-2 mt-1.5 flex gap-3 text-xs text-gray-500">
-                                            <span>{comment.timestamp ? new Date(comment.timestamp.seconds * 1000).toLocaleDateString() : 'agora'}</span>
+                                            
+                                            <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                                                {comment.text}
+                                            </p>
                                         </div>
                                     </div>
-                                </div>
-                            ))}
-                            {comments.length === 0 && <p className="text-center text-gray-500 py-6">Nenhum comentário ainda. Seja o primeiro!</p>}
+                                ))}
+                                
+                                {comments.length === 0 && (
+                                    <div className="text-center py-10 border-2 border-dashed border-gray-800 rounded-xl">
+                                        <p className="text-gray-500">Nenhum comentário ainda.</p>
+                                        <p className="text-indigo-400 text-sm mt-1">Seja a primeira pessoa a opinar!</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                {/* --- COLUNA LATERAL (SOBRE O CLUBE) --- */}
-                <div className="lg:col-span-1 space-y-6">
-                    <div className="bg-gray-800/70 p-5 rounded-xl border border-gray-700">
-                        <div className="flex items-center gap-3 mb-4">
-                            <img src={groupData.photo} className="w-12 h-12 rounded-lg bg-gray-700" alt="" />
-                            <div>
-                                <p className="text-xs text-gray-400">Postado em</p>
-                                <h3 className="font-bold text-lg">{groupData.name}</h3>
+                    {/* RIGHT COL: SIDEBAR (4 cols) */}
+                    <div className="lg:col-span-4 hidden lg:block">
+                        <div className="sticky top-24 space-y-6">
+                            
+                            {/* Group Mini Info */}
+                            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl">
+                                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Sobre a Comunidade</h3>
+                                <div className="flex items-center gap-4 mb-4 cursor-pointer hover:bg-gray-800/50 p-2 -mx-2 rounded-lg transition-colors" onClick={() => navigate(`/club/${groupId}`)}>
+                                    <img src={groupData.photo} className="w-12 h-12 rounded-xl object-cover" alt="" />
+                                    <div>
+                                        <h2 className="font-bold text-white leading-tight">{groupData.name}</h2>
+                                        <p className="text-xs text-gray-400 mt-1">{groupData.members?.length} Membros</p>
+                                    </div>
+                                </div>
+                                <p className="text-sm text-gray-400 leading-relaxed mb-6 border-t border-gray-800 pt-4">
+                                    {groupData.description || "Uma comunidade do CineSync."}
+                                </p>
+                                
+                                <button 
+                                    onClick={() => navigate(`/club/${groupId}`)}
+                                    className="w-full bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-colors text-sm"
+                                >
+                                    Ver todos os posts
+                                </button>
                             </div>
-                        </div>
-                        <p className="text-gray-400 text-sm mb-4">Um espaço para fãs de {groupData.name}.</p>
-                        <div className="flex items-center gap-4 text-sm border-t border-gray-700 pt-3">
-                            <div className="text-center">
-                                <p className="font-bold text-xl">{groupData.members?.length}</p>
-                                <p className="text-gray-400">Membros</p>
+
+                            {/* Rules (Optional) */}
+                            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+                                <h3 className="font-bold text-gray-100 mb-3 text-sm flex items-center gap-2">
+                                    <span className="w-1 h-4 bg-indigo-500 rounded-full"></span>
+                                    Regras
+                                </h3>
+                                <ul className="text-xs text-gray-400 space-y-3">
+                                    <li className="flex gap-2"><span className="font-bold text-gray-600">1.</span> Respeito acima de tudo.</li>
+                                    <li className="flex gap-2"><span className="font-bold text-gray-600">2.</span> Sem spoilers no título.</li>
+                                    <li className="flex gap-2"><span className="font-bold text-gray-600">3.</span> Mantenha o foco no tema.</li>
+                                </ul>
                             </div>
+
                         </div>
                     </div>
+
                 </div>
             </div>
         </div>

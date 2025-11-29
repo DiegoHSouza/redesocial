@@ -5,15 +5,18 @@ import { DiceIcon, CloseIcon, ChevronDownIcon } from './Icons';
 import ContentCard from './ContentCard';
 import ConfirmModal from './ConfirmModal'; 
 import { useAuth } from '../contexts/AuthContext';
-import { awardXP } from '../utils/gamification'; // Mantido conforme seu snippet
+// AJUSTE 1: Importamos a nova função conectada ao Backend
+import { registerRandomPickerXP } from '../utils/gamification'; 
 import { useNavigate } from 'react-router-dom';
+
+// DICA: Se você tiver uma biblioteca de Toast (ex: react-hot-toast), importe aqui
+// import toast from 'react-hot-toast';
 
 const STREAMING_SERVICES = [
     { id: 8, name: 'Netflix' }, { id: 119, name: 'Prime Video' },
     { id: 337, name: 'Disney+' }, { id: 1899, name: 'Max' }, { id: 350, name: 'Apple TV+' },
 ];
 
-// ALTERAÇÃO: Recebendo onSpin como prop para comunicar com a HomePage
 const RandomPicker = ({ onSpin }) => {
     const [genres, setGenres] = useState([]);
     const [selectedService, setSelectedService] = useState('');
@@ -28,6 +31,9 @@ const RandomPicker = ({ onSpin }) => {
     // Estados de Modal
     const [showResultModal, setShowResultModal] = useState(false);
     const [showErrorModal, setShowErrorModal] = useState(false);
+    
+    // Estado para feedback visual do XP dentro do modal (opcional, mas legal)
+    const [xpFeedback, setXpFeedback] = useState(null); // 'success', 'cooldown', null
 
     const navigate = useNavigate();
 
@@ -66,9 +72,7 @@ const RandomPicker = ({ onSpin }) => {
         const finalData = await tmdbApi.discoverContent(type, service || null, randomPage, genre || null);
         let items = finalData.results.filter(item => item.poster_path);
 
-        // Fallback para página 1 se a aleatória estiver vazia
         if (items.length === 0 && totalPages > 0) {
-            console.log("Página aleatória vazia. Tentando resgate na página 1...");
             const rescueData = await tmdbApi.discoverContent(type, service || null, 1, genre || null);
             items = rescueData.results.filter(item => item.poster_path);
         }
@@ -86,6 +90,7 @@ const RandomPicker = ({ onSpin }) => {
     const handleSpin = async () => {
         setLoading(true);
         setResult(null);
+        setXpFeedback(null); // Reset feedback
         
         try {
             const randomItem = await fetchRandomItem();
@@ -94,14 +99,24 @@ const RandomPicker = ({ onSpin }) => {
                 setResult(randomItem);
                 setShowResultModal(true);
                 
-                // 1. Chama a função do Pai (HomePage) para registrar no Backend
-                if (onSpin) {
-                    onSpin();
-                }
+                if (onSpin) onSpin();
 
-                // 2. Mantém sua lógica local de XP (caso use para UI imediata)
+                // AJUSTE 2: Lógica de XP Assíncrona e Segura
+                // Não usamos 'await' aqui para não travar a abertura do modal
                 if (currentUser) {
-                    awardXP(currentUser.uid, 'USE_RANDOM_PICKER');
+                    registerRandomPickerXP()
+                        .then(() => {
+                            setXpFeedback('success');
+                            // Se tiver toast: toast.success("+5 XP: Sorteio realizado!");
+                        })
+                        .catch((err) => {
+                            if (err.message === 'WAIT_COOLDOWN') {
+                                setXpFeedback('cooldown');
+                                // Se tiver toast: toast('Aguarde um pouco para ganhar XP de novo.', { icon: '⏳' });
+                            } else {
+                                console.error("Erro silencioso de XP:", err);
+                            }
+                        });
                 }
             } else {
                 setShowErrorModal(true);
@@ -195,6 +210,20 @@ const RandomPicker = ({ onSpin }) => {
                             <CloseIcon className="w-6 h-6" />
                         </button>
                         
+                        {/* AJUSTE 3: Feedback visual de XP dentro do modal */}
+                        <div className="absolute top-4 left-4">
+                            {xpFeedback === 'success' && (
+                                <span className="bg-green-500/20 text-green-400 text-xs px-2 py-1 rounded-full border border-green-500/50 font-bold animate-pulse">
+                                    +5 XP
+                                </span>
+                            )}
+                            {xpFeedback === 'cooldown' && (
+                                <span className="bg-yellow-500/20 text-yellow-400 text-xs px-2 py-1 rounded-full border border-yellow-500/50 font-medium" title="Espere um pouco para ganhar XP novamente">
+                                    ⏳ Cooldown
+                                </span>
+                            )}
+                        </div>
+
                         <h4 className="text-lg font-semibold text-gray-300 mb-4">O destino escolheu:</h4>
                         
                         <div className="w-48 mb-6 transform hover:scale-105 transition-transform duration-300">

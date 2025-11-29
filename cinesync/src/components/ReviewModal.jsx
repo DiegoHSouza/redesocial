@@ -3,7 +3,7 @@ import { db, auth } from '../services/firebaseConfig';
 import firebase from 'firebase/compat/app';
 import { ErrorMessage } from './Common';
 import { TMDB_IMAGE_URL } from '../services/tmdbApi';
-import { awardXP } from '../utils/gamification'; // <--- IMPORTANTE: Importando o sistema de XP
+// REMOVIDO: import { awardXP } ... (O Backend agora gerencia isso via Triggers)
 
 const ReviewModal = ({ movie, onClose, existingReview, mediaType }) => {
     const { currentUser } = auth;
@@ -32,21 +32,21 @@ const ReviewModal = ({ movie, onClose, existingReview, mediaType }) => {
                     uidAutor: currentUser.uid,
                     movieId: movie.id.toString(),
                     movieTitle: movie.title || movie.name,
-                    moviePoster: `${TMDB_IMAGE_URL}${movie.poster_path}`,
+                    moviePoster: movie.poster_path ? `${TMDB_IMAGE_URL}${movie.poster_path}` : null,
                     nota: nota,
                     comentario: comentario,
                     curtidas: [],
-                    mediaType: mediaType,
-                    commentCount: 0, // Inicializa com 0
+                    mediaType: mediaType || 'movie', // Garante fallback se mediaType vier vazio
+                    commentCount: 0,
                     timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                 });
                 
-                // --- GAMIFICATION: Dar 20 XP por criar review ---
-                await awardXP(currentUser.uid, 20, 'review');
-
-                // Atualizar contador de reviews do usuário
-                const userRef = db.collection("users").doc(currentUser.uid);
-                await userRef.update({ 'stats.reviews': firebase.firestore.FieldValue.increment(1) });
+                // NOTA: As linhas de XP (awardXP) e Stats (increment) foram removidas daqui.
+                // O Backend (Cloud Functions) vai detectar a criação deste documento 
+                // e automaticamente:
+                // 1. Dar o XP para o usuário
+                // 2. Incrementar o contador de reviews do usuário
+                // 3. Verificar se ele ganhou alguma medalha nova
             }
             onClose();
         } catch (err) {

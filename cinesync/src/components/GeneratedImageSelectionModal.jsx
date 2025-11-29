@@ -12,7 +12,7 @@ const GeneratedImageSelectionModal = ({ media, targetType, onSelectImage, onBack
             setLoading(true);
             try {
                 if (targetType === 'avatar') {
-                    // Para Avatar: Buscamos o Elenco (Cast)
+                    // Para Avatar: BuscAamos o Elenco (Cast)
                     const credits = await tmdbApi.get(`${media.media_type}/${media.id}/credits`);
                     // Pegamos os top 15 atores que tenham foto
                     const castWithPhotos = credits.cast

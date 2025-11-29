@@ -1,7 +1,7 @@
 import { getFunctions, httpsCallable } from "firebase/functions";
 import firebase from 'firebase/compat/app';
 
-// --- CONFIGURAÇÃO DE PONTOS ---
+// --- CONFIGURAÇÃO DE PONTOS (Referência Visual apenas) ---
 export const XP_POINTS = {
     REVIEW: 30,
     COMMENT: 10,
@@ -12,15 +12,16 @@ export const XP_POINTS = {
     CREATE_CLUB_POST: 15,
 };
 
-// --- CONFIGURAÇÃO DE MEDALHAS (VISUAL) ---
-// Adicionamos 'statField' (para saber o que medir) e 'limit' (para saber a meta)
+// --- CONFIGURAÇÃO DE MEDALHAS (METADADOS VISUAIS) ---
+// IMPORTANTE: Os campos 'limit' DEVEM ser idênticos ao 'BADGE_RULES' do Backend.
+// Se mudar lá, tem que mudar aqui para a barra de progresso bater certo.
 export const BADGES = {
     // --- CRÍTICO (Reviews) ---
     'critic_bronze': { 
         id: 'critic_bronze', 
         type: 'CRITIC', 
         rank: 1, 
-        statField: 'reviews', 
+        statField: 'reviews', // Deve bater com stats.reviews do Firestore
         limit: 1,            
         name: 'Crítico Iniciante', 
         icon: '📝', 
@@ -143,12 +144,12 @@ export const BADGES = {
         desc: 'Tapete vermelho para você! 50 seguidores.' 
     },
 
-    // --- COMUNIDADE (ATUALIZADO PARA EVOLUÇÃO) ---
+    // --- COMUNIDADE (Club Posts) ---
     'community_bronze': { 
         id: 'community_bronze', 
         type: 'COMMUNITY', 
         rank: 1, 
-        statField: 'club_posts', 
+        statField: 'club_posts',
         limit: 1,
         name: 'Pioneiro', 
         icon: '🏛️', 
@@ -158,7 +159,7 @@ export const BADGES = {
         id: 'community_silver', 
         type: 'COMMUNITY', 
         rank: 2, 
-        statField: 'club_posts', 
+        statField: 'club_posts',
         limit: 5,
         name: 'Debatedor', 
         icon: '💬', 
@@ -168,14 +169,14 @@ export const BADGES = {
         id: 'community_gold', 
         type: 'COMMUNITY', 
         rank: 3, 
-        statField: 'club_posts', 
+        statField: 'club_posts',
         limit: 20,
         name: 'Líder', 
         icon: '📢', 
         desc: 'Uma voz essencial nos clubes. 20 posts criados.' 
     },
     
-    // Legado (Fallback)
+    // Legado
     'first_review': { 
         id: 'first_review', 
         type: 'LEGACY', 
@@ -186,8 +187,7 @@ export const BADGES = {
     },
 };
 
-// --- LÓGICA DE NÍVEIS (Sincronizada) ---
-
+// --- LÓGICA DE NÍVEIS (Visualização) ---
 export const calculateLevel = (xp) => {
     if (xp < 100) return 1;
     if (xp < 300) return 2;
@@ -204,44 +204,47 @@ export const getNextLevelXp = (currentLevel) => {
     return (currentLevel - 4) * 500 + 1000;
 };
 
-// Esta função serve para compatibilidade local, mas o XP real 
-// é atribuído pelos Gatilhos (Triggers) no Backend.
-export const awardXP = async (userId, actionType) => {
-    return; 
-};
+// --- ACIONADORES BACKEND ---
 
-// --- ACIONADOR DO SORTEADOR (NOVO) ---
+/**
+ * Aciona o sorteador e gerencia erros de Spam (Debounce)
+ * Retorna { success: true, ... } ou lança erro tratado.
+ */
 export const registerRandomPickerXP = async () => {
     try {
         const functions = getFunctions(firebase.app(), "southamerica-east1");
-        // Chama a função 'registerRandomPickerUsage' que criamos no index.js
         const pickerFunction = httpsCallable(functions, 'registerRandomPickerUsage');
         
         console.log("Registrando uso do sorteador...");
         const result = await pickerFunction();
         
-        console.log("XP do sorteador atribuído:", result.data);
+        console.log("XP do sorteador atribuído com sucesso.");
         return result.data;
+
     } catch (error) {
-        console.error("Erro ao registrar XP do sorteador:", error);
-        // Não lançamos throw aqui para não travar o sorteador se a internet falhar
-        return null;
+        // Tratamento do erro específico de "Muitas tentativas"
+        if (error.code === 'resource-exhausted') {
+            console.warn("Spam detectado no sorteador. XP não computado.");
+            throw new Error("WAIT_COOLDOWN"); // Identificador para o Front exibir Toast específico
+        }
+        
+        console.error("Erro desconhecido no sorteador:", error);
+        return null; 
     }
 };
 
-// --- ACIONADOR DO RECALCULO DE XP ---
 export const triggerUserRecalculation = async () => {
     try {
         const functions = getFunctions(firebase.app(), "southamerica-east1");
         const recalculateFunction = httpsCallable(functions, 'recalculateUserXP');
         
-        console.log("Iniciando sincronização...");
+        console.log("Iniciando sincronização forçada...");
         const result = await recalculateFunction();
         
-        console.log("Sucesso:", result.data);
+        console.log("Sincronização concluída:", result.data);
         return result.data;
     } catch (error) {
-        console.error("Erro na sincronização:", error);
+        console.error("Erro crítico na sincronização:", error);
         throw error;
     }
 };

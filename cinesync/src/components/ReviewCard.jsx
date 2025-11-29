@@ -23,6 +23,7 @@ const ReviewCard = ({ review: initialReview, activeTab }) => { // 1. Receber act
     const [isEditing, setIsEditing] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isFollowing, setIsFollowing] = useState(false); // 3. Estado para seguir
+    const [commentConfirmModal, setCommentConfirmModal] = useState(null); // Estado para o modal de confirmação do comentário
     const [showReactions, setShowReactions] = useState(false); // Estado para o seletor de reações
     
     const optionsRef = useRef(null);
@@ -383,12 +384,17 @@ const ReviewCard = ({ review: initialReview, activeTab }) => { // 1. Receber act
             
             {showComments && (
                 <div className="mt-[-10px] mx-2 bg-gray-800/30 border-x border-b border-gray-700 rounded-b-xl p-4 pt-6 relative z-0">
-                    <CommentSection review={review} onCountChange={setRealCommentCount} />
+                    <CommentSection 
+                        review={review} 
+                        onCountChange={setRealCommentCount} 
+                        renderConfirmModal={(modal) => { setTimeout(() => setCommentConfirmModal(modal), 0); return null; }}
+                    />
                 </div>
             )}
             
             {isEditing && <ReviewModal movie={{ id: review.movieId, title: review.movieTitle, poster_path: review.moviePoster.replace('https://image.tmdb.org/t/p/w500', '') }} mediaType={review.mediaType || 'movie'} existingReview={review} onClose={() => setIsEditing(false)} />}
             <ConfirmModal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} onConfirm={confirmDeleteReview} title="Apagar Avaliação" message="Tem certeza?" confirmText="Apagar" isDanger={true} />
+            {commentConfirmModal}
         </div>
     );
 };

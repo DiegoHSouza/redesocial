@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { tmdbApi, TMDB_IMAGE_URL } from '../services/tmdbApi';
-import { registerRandomPickerXP } from "../utils/gamification"; // <--- AJUSTE O CAMINHO SE NECESSÁRIO
+import { registerRandomPickerXP } from "../utils/gamification";
 import RandomPicker from '../components/RandomPicker';
-import { HeartIcon, DiceIcon, LayoutGridIcon, UsersIcon } from '../components/Icons';
+import { HeartIcon, DiceIcon, LayoutGridIcon, UsersIcon, TrophyIcon } from '../components/Icons'; // ✅ Adicionei TrophyIcon
 
 const STREAMING_SERVICES = [
     { id: 8, name: 'Netflix', logo: '/logos/netflix.svg', color: 'shadow-red-500/40' },
@@ -31,7 +31,6 @@ const HomePage = () => {
         }
     };
 
-    // --- NOVO: Handler para registrar XP quando usar a roleta ---
     const handleRouletteUsed = async () => {
         console.log("Sorteador utilizado! Registrando XP...");
         await registerRandomPickerXP();
@@ -51,7 +50,7 @@ const HomePage = () => {
                 {/* --- MENU DE ABAS --- */}
                 <div className="flex justify-center mb-6 md:mb-10 overflow-x-auto pb-2 md:pb-0 w-full">
                     <div className="bg-gray-800/80 p-1.5 rounded-xl flex items-center shadow-lg border border-gray-700/50 whitespace-nowrap overflow-x-auto w-full max-w-full gap-1">
-                        {/* Abas centralizadas, responsivas e ocupando todo espaço */}
+                        
                         <button 
                             onClick={() => setActiveTab('catalog')}
                             className={`flex flex-col items-center justify-center flex-1 px-0 md:px-6 py-2 rounded-lg text-3xl md:text-sm font-bold transition-all duration-300 min-w-0 ${activeTab === 'catalog' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
@@ -60,6 +59,7 @@ const HomePage = () => {
                             <LayoutGridIcon className="w-9 h-9 md:w-5 md:h-5 mx-auto" />
                             <span className="hidden md:inline truncate">Catálogo</span>
                         </button>
+
                         <button 
                             onClick={() => setActiveTab('roulette')}
                             className={`flex flex-col items-center justify-center flex-1 px-0 md:px-6 py-2 rounded-lg text-3xl md:text-sm font-bold transition-all duration-300 min-w-0 ${activeTab === 'roulette' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
@@ -68,6 +68,7 @@ const HomePage = () => {
                             <DiceIcon className="w-9 h-9 md:w-5 md:h-5 mx-auto" />
                             <span className="hidden md:inline truncate">Sorteador</span>
                         </button>
+
                         <button 
                             onClick={() => setActiveTab('match')}
                             className={`flex flex-col items-center justify-center flex-1 px-0 md:px-6 py-2 rounded-lg text-3xl md:text-sm font-bold transition-all duration-300 min-w-0 ${activeTab === 'match' ? 'bg-pink-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
@@ -76,6 +77,7 @@ const HomePage = () => {
                             <HeartIcon className="w-9 h-9 md:w-5 md:h-5 mx-auto" />
                             <span className="hidden md:inline truncate">CineMatch</span>
                         </button>
+
                         <button 
                             onClick={() => setActiveTab('clubs')}
                             className={`flex flex-col items-center justify-center flex-1 px-0 md:px-6 py-2 rounded-lg text-3xl md:text-sm font-bold transition-all duration-300 min-w-0 ${activeTab === 'clubs' ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
@@ -84,6 +86,17 @@ const HomePage = () => {
                             <UsersIcon className="w-9 h-9 md:w-5 md:h-5 mx-auto" />
                             <span className="hidden md:inline truncate">Clubes</span>
                         </button>
+
+                        {/* ✅ NOVA ABA: BATALHA */}
+                        <button 
+                            onClick={() => setActiveTab('battle')}
+                            className={`flex flex-col items-center justify-center flex-1 px-0 md:px-6 py-2 rounded-lg text-3xl md:text-sm font-bold transition-all duration-300 min-w-0 ${activeTab === 'battle' ? 'bg-orange-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
+                            style={{minWidth: 0}}
+                        >
+                            <TrophyIcon className="w-9 h-9 md:w-5 md:h-5 mx-auto" />
+                            <span className="hidden md:inline truncate">Batalha</span>
+                        </button>
+
                     </div>
                 </div>
 
@@ -104,7 +117,6 @@ const HomePage = () => {
                 {/* ABA 2: ROLETA */}
                 {activeTab === 'roulette' && (
                     <div className="animate-fade-in py-2 md:py-4">
-                        {/* Passamos a função handleRouletteUsed via prop 'onSpin' */}
                         <RandomPicker onSpin={handleRouletteUsed} />
                     </div>
                 )}
@@ -149,6 +161,34 @@ const HomePage = () => {
                     </div>
                 )}
 
+                {/* ✅ ABA 5: CINEBATTLE */}
+                {activeTab === 'battle' && (
+                    <div className="animate-fade-in py-4 md:py-8 flex flex-col items-center">
+                         <div 
+                            onClick={() => navigate('/battle')}
+                            className="w-full bg-gradient-to-br from-orange-900/60 to-red-900/60 border border-orange-500/30 rounded-3xl p-6 md:p-12 flex flex-col items-center text-center cursor-pointer hover:scale-[1.01] transition-transform group shadow-2xl shadow-orange-900/30 relative overflow-hidden"
+                        >
+                            {/* Efeitos de Fundo */}
+                            <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-orange-500/20 rounded-full blur-3xl animate-pulse"></div>
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-orange-500/50 to-transparent"></div>
+                            
+                            {/* Ícone */}
+                            <TrophyIcon className="w-16 md:w-20 h-16 md:h-20 text-orange-500 mb-4 md:mb-6 drop-shadow-lg transform group-hover:scale-110 transition-transform" />
+                            
+                            {/* Texto */}
+                            <h3 className="text-2xl md:text-4xl font-bold text-white mb-2 md:mb-4">CineBattle</h3>
+                            <p className="text-gray-300 text-base md:text-lg mb-4 md:mb-8 max-w-lg leading-relaxed">
+                                Dois filmes entram, apenas um sai vencedor. Vote nos seus favoritos e defina o ranking da comunidade.
+                            </p>
+                            
+                            {/* Botão */}
+                            <div className="bg-orange-600 px-6 md:px-8 py-3 md:py-4 rounded-full font-bold text-white text-base md:text-lg group-hover:bg-orange-500 transition-colors flex items-center gap-3 shadow-lg">
+                                Entrar na Arena
+                            </div>
+                        </div>
+                    </div>
+                )}
+
             </div>
         </div>
     );
@@ -162,7 +202,7 @@ const ServiceCard = ({ service, onClick }) => {
     useEffect(() => {
         let isMounted = true;
         const fetchPosters = async () => {
-            if (service.id === 'all' || service.id === 'match' || service.id === 'clubs') return;
+            if (service.id === 'all' || service.id === 'match' || service.id === 'clubs' || service.id === 'battle') return;
             try {
                 const data = await tmdbApi.discoverContent('movie', service.id, 1, null, 'popularity.desc');
                 const posterUrls = data.results

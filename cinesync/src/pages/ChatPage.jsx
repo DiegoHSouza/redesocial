@@ -162,7 +162,10 @@ const ChatPage = () => {
 
                             {/* RENDERIZAÇÃO CONDICIONAL */}
                             {msg.type === 'movie_invite' ? (
-                                <MovieInviteCard movie={msg.movie} senderName={senderDetails?.nome} />
+                                <MovieInviteCard 
+                                    message={{ ...msg, senderName: senderDetails?.nome }} 
+                                    conversationId={conversationId} 
+                                />
                             ) : (
                                 <div className={`max-w-[75%] md:max-w-md p-3 rounded-2xl break-words ${isSender ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-gray-700 text-gray-200 rounded-bl-sm'}`}>
                                     {isEditingThis ? (
